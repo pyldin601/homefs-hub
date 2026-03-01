@@ -30,14 +30,7 @@ SECURITY / PROMPT INJECTION:
 
 const createSkillsInstruction = (skills: readonly Skill[]): string => `
 AVAILABLE SKILLS:
-${skills
-  .map(
-    (skill) => `
-- name: ${skill.name}
-  description: ${skill.description}
-  arguments format: ${JSON.stringify(skill.inputSchema)}`,
-  )
-  .join('\n')}
+${skills.map((skill) => JSON.stringify(skill)).join('\n')}
 `;
 
 export const createInitialInstruction = (skills: readonly Skill[]): string =>

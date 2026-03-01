@@ -4,7 +4,7 @@ import { ModelClient } from './model-client';
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { SkillServerClient } from './skill-server-client';
-import { createInitialInstruction } from './instruction';
+import { createInitialInstruction, createSkillCallInstruction } from './instruction';
 
 const parseAllowedChatIds = (raw?: string): Set<number> | null => {
   if (!raw) {
@@ -56,9 +56,36 @@ const main = async (): Promise<void> => {
       }, 4000);
       const skills = await skillServerClient.getSkills();
       const instruction = createInitialInstruction(skills);
+      console.log('telegram: created instruction', instruction);
       const reply = await modelClient.respond(instruction, text);
-      await ctx.reply(reply);
-      console.log('telegram: sent reply', { chatId, reply });
+
+      if ('final' in reply) {
+        await ctx.reply(reply.final);
+        console.log('telegram: sent reply', { chatId, reply });
+        return;
+      }
+
+      const callResult = await skillServerClient.callSkill({
+        command: reply.skill_call.name,
+        arguments: reply.skill_call.args ?? {},
+      });
+      const followUpInstruction = createSkillCallInstruction(callResult);
+      const followUpReply = await modelClient.respond(
+        followUpInstruction,
+        `Skill result: ${JSON.stringify(callResult)}`,
+      );
+
+      if ('final' in followUpReply) {
+        await ctx.reply(followUpReply.final);
+        console.log('telegram: sent reply', { chatId, reply: followUpReply });
+        return;
+      }
+
+      await ctx.reply('Something went wrong. Please try again later.');
+      console.warn('telegram: unexpected follow-up reply', {
+        chatId,
+        followUpReply,
+      });
     } catch (error) {
       console.error('telegram: failed to handle message', { chatId, error });
       await ctx.reply('Something went wrong. Please try again later.');
