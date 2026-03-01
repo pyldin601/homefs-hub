@@ -6,10 +6,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "dev": "tsc -w",
+    "dev": "tsx watch src/index.ts",
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
+    "dotenv": "^16.4.5",
+    "telegraf": "^4.16.3",
     "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
   }
 }
