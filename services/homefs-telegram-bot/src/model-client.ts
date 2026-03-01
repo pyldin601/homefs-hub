@@ -8,17 +8,15 @@ type GenerateResponse = {
 };
 
 export class ModelClient {
-  private readonly instruction: string;
   private readonly credentials: OllamaCredentials;
 
-  constructor(instruction: string, credentials: OllamaCredentials) {
-    this.instruction = instruction;
+  constructor(credentials: OllamaCredentials) {
     this.credentials = credentials;
   }
 
-  async respond(inputMessage: string): Promise<string> {
+  async respond(instruction: string, inputMessage: string): Promise<string> {
     const url = new URL('/api/generate', this.credentials.baseUrl);
-    const prompt = `${this.instruction}\n\n${inputMessage}`.trim();
+    const prompt = `${instruction}\n\n${inputMessage}`.trim();
 
     const response = await fetch(url, {
       method: 'POST',

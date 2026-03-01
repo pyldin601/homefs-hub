@@ -38,6 +38,7 @@ const main = (): void => {
   });
 
   const config = ConfigSchema.parse(process.env);
+
   const port = config.PORT ?? 3000;
 
   app.listen(port, () => {

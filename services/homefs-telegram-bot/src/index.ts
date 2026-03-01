@@ -3,6 +3,8 @@ import { ConfigSchema, type Config } from './config';
 import { ModelClient } from './model-client';
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
+import { SkillServerClient } from './skill-server-client';
+import { createInitialInstruction } from './instruction';
 
 const parseAllowedChatIds = (raw?: string): Set<number> | null => {
   if (!raw) {
@@ -20,7 +22,8 @@ const parseAllowedChatIds = (raw?: string): Set<number> | null => {
 const main = async (): Promise<void> => {
   const config: Config = ConfigSchema.parse(process.env);
   const allowedChatIds = parseAllowedChatIds(config.ALLOWED_CHAT_IDS);
-  const modelClient = new ModelClient('You are a helpful assistant.', {
+  const skillServerClient = new SkillServerClient(config.SKILL_SERVER_URL);
+  const modelClient = new ModelClient({
     baseUrl: config.OLLAMA_BASE_URL,
     model: config.OLLAMA_MODEL,
   });
@@ -51,7 +54,9 @@ const main = async (): Promise<void> => {
           });
         });
       }, 4000);
-      const reply = await modelClient.respond(text);
+      const skills = await skillServerClient.getSkills();
+      const instruction = createInitialInstruction(skills);
+      const reply = await modelClient.respond(instruction, text);
       await ctx.reply(reply);
       console.log('telegram: sent reply', { chatId, reply });
     } catch (error) {
