@@ -4,8 +4,22 @@ import { ModelClient } from './model-client';
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
 
+const parseAllowedChatIds = (raw?: string): Set<number> | null => {
+  if (!raw) {
+    return null;
+  }
+
+  const ids = raw
+    .split(',')
+    .map((entry) => Number.parseInt(entry.trim(), 10))
+    .filter((value) => Number.isFinite(value));
+
+  return ids.length > 0 ? new Set(ids) : null;
+};
+
 const main = async (): Promise<void> => {
   const config: Config = ConfigSchema.parse(process.env);
+  const allowedChatIds = parseAllowedChatIds(config.ALLOWED_CHAT_IDS);
   const modelClient = new ModelClient('You are a helpful assistant.', {
     baseUrl: config.OLLAMA_BASE_URL,
     model: config.OLLAMA_MODEL,
@@ -18,6 +32,14 @@ const main = async (): Promise<void> => {
     let typingInterval: NodeJS.Timeout | null = null;
 
     try {
+      if (allowedChatIds && !allowedChatIds.has(chatId)) {
+        console.warn('telegram: blocked message from unapproved chat', {
+          chatId,
+        });
+        await ctx.reply('This bot is not authorized for this chat.');
+        return;
+      }
+
       console.log('telegram: received message', { chatId, text });
       // Keep the typing indicator visible while the model is generating.
       await ctx.sendChatAction('typing');
