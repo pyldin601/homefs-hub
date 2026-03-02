@@ -3,12 +3,8 @@ import { ConfigSchema, type Config } from './config';
 import { ModelClient } from './model-client';
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
-import { compile } from 'handlebars';
 import { SkillServerClient } from './skill-server-client';
-import { readFileSync } from 'node:fs';
-
-const templateSource = readFileSync(`./templates/base.hbs`, 'utf8');
-const baseTemplate = compile<void>(templateSource);
+import { SkillOrchestrator } from './skill-orchestrator';
 
 const parseAllowedChatIds = (raw?: string): Set<number> | null => {
   if (!raw) {
@@ -30,6 +26,10 @@ const main = async (): Promise<void> => {
   const modelClient = new ModelClient({
     baseUrl: config.OLLAMA_BASE_URL,
     model: config.OLLAMA_MODEL,
+  });
+  const skillOrchestrator = new SkillOrchestrator({
+    modelClient,
+    skillServerClient,
   });
   const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
 
@@ -57,11 +57,8 @@ const main = async (): Promise<void> => {
           });
         });
       }, 3000);
-      //const skills = await skillServerClient.getSkills();
-      const instruction = baseTemplate();
-      console.log('telegram: created instruction', instruction);
-      const reply = await modelClient.respond(instruction, text);
-      await ctx.reply(JSON.stringify(reply));
+      const reply = await skillOrchestrator.run(text);
+      await ctx.reply(reply);
     } catch (error) {
       console.error('telegram: failed to handle message', { chatId, error });
       await ctx.reply('Something went wrong. Please try again later.');

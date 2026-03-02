@@ -11,10 +11,24 @@ const GenerateResponseSchema = z.object({
   }),
 });
 
-const SkillCallSchema = z.object({
-  skill: z.string().min(1),
-  arguments: z.record(z.unknown()).optional(),
-});
+const FinalResponseSchema = z
+  .object({
+    final: z.string(),
+  })
+  .strict();
+
+const SkillCallResponseSchema = z
+  .object({
+    skill_call: z.object({
+      name: z.string().min(1),
+      arguments: z.record(z.unknown()).optional(),
+    }),
+  })
+  .strict();
+
+const ModelResponseSchema = z.union([FinalResponseSchema, SkillCallResponseSchema]);
+
+export type ModelResponse = z.infer<typeof ModelResponseSchema>;
 
 export class ModelClient {
   private readonly credentials: OllamaCredentials;
@@ -23,7 +37,7 @@ export class ModelClient {
     this.credentials = credentials;
   }
 
-  async respond(instruction: string, inputMessage: string) {
+  async respond(instruction: string, message: string): Promise<ModelResponse> {
     const url = new URL('/api/chat', this.credentials.baseUrl);
 
     const response = await fetch(url, {
@@ -33,7 +47,7 @@ export class ModelClient {
         model: this.credentials.model,
         messages: [
           { role: 'system', content: instruction },
-          { role: 'user', content: inputMessage },
+          { role: 'user', content: message },
         ],
         stream: false,
       }),
@@ -46,12 +60,14 @@ export class ModelClient {
     const json = await response.json();
 
     const data = GenerateResponseSchema.parse(json);
+    const content = data.message.content.trim();
 
     try {
-      const maybeJson = JSON.parse(data.message.content.replace('```json', '').replace('```', ''));
-      return SkillCallSchema.parse(maybeJson);
-    } catch (error) {
-      return { final: data.message.content };
+      const withoutCodeFence = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      const maybeJson = JSON.parse(withoutCodeFence);
+      return ModelResponseSchema.parse(maybeJson);
+    } catch {
+      return { final: content };
     }
   }
 }
