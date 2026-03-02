@@ -10,7 +10,7 @@ OUTPUT RULE (absolute):
 
 RESPONSE SHAPES (choose exactly one):
 1) Skill request:
-{"skill_call":{"name":"SKILL_NAME","args":{...}}}  
+{"skill_call":{"name":"SKILL_NAME","arguments":{...}}}  
 2) Final user answer:
 {"final":"...human language answer..."}
 

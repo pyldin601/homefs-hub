@@ -3,8 +3,12 @@ import { ConfigSchema, type Config } from './config';
 import { ModelClient } from './model-client';
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
+import { compile } from 'handlebars';
 import { SkillServerClient } from './skill-server-client';
-import { createInitialInstruction, createSkillCallInstruction } from './instruction';
+import { readFileSync } from 'node:fs';
+
+const templateSource = readFileSync(`./templates/base.hbs`, 'utf8');
+const baseTemplate = compile<void>(templateSource);
 
 const parseAllowedChatIds = (raw?: string): Set<number> | null => {
   if (!raw) {
@@ -45,7 +49,6 @@ const main = async (): Promise<void> => {
 
       console.log('telegram: received message', { chatId, text });
       // Keep the typing indicator visible while the model is generating.
-      await ctx.sendChatAction('typing');
       typingInterval = setInterval(() => {
         ctx.sendChatAction('typing').catch((error) => {
           console.warn('telegram: failed to refresh typing indicator', {
@@ -53,39 +56,12 @@ const main = async (): Promise<void> => {
             error,
           });
         });
-      }, 4000);
-      const skills = await skillServerClient.getSkills();
-      const instruction = createInitialInstruction(skills);
+      }, 3000);
+      //const skills = await skillServerClient.getSkills();
+      const instruction = baseTemplate();
       console.log('telegram: created instruction', instruction);
       const reply = await modelClient.respond(instruction, text);
-
-      if ('final' in reply) {
-        await ctx.reply(reply.final);
-        console.log('telegram: sent reply', { chatId, reply });
-        return;
-      }
-
-      const callResult = await skillServerClient.callSkill({
-        command: reply.skill_call.name,
-        arguments: reply.skill_call.args ?? {},
-      });
-      const followUpInstruction = createSkillCallInstruction(callResult);
-      const followUpReply = await modelClient.respond(
-        followUpInstruction,
-        `Skill result: ${JSON.stringify(callResult)}`,
-      );
-
-      if ('final' in followUpReply) {
-        await ctx.reply(followUpReply.final);
-        console.log('telegram: sent reply', { chatId, reply: followUpReply });
-        return;
-      }
-
-      await ctx.reply('Something went wrong. Please try again later.');
-      console.warn('telegram: unexpected follow-up reply', {
-        chatId,
-        followUpReply,
-      });
+      await ctx.reply(JSON.stringify(reply));
     } catch (error) {
       console.error('telegram: failed to handle message', { chatId, error });
       await ctx.reply('Something went wrong. Please try again later.');
