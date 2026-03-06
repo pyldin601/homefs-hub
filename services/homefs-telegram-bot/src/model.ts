@@ -1,25 +1,31 @@
 import { z } from 'zod';
 import { INSTRUCTION } from './instruction';
+import type { TolokaClient } from './toloka';
 
 type OllamaCredentials = {
   baseUrl: string;
   model: string;
 };
 
+const ToolCallSchema = z.object({
+  id: z.string().optional(),
+  function: z.object({
+    name: z.enum([
+      'get_date',
+      'search_torrents',
+      'list_torrent_bookmarks',
+      'bookmark_torrent',
+      'remove_torrent_bookmark',
+    ]),
+    arguments: z.union([z.record(z.unknown()), z.string()]).optional(),
+  }),
+});
+
 const GenerateResponseSchema = z.object({
   message: z.object({
     role: z.string(),
     content: z.string(),
-    tool_calls: z
-      .array(
-        z.object({
-          id: z.string(),
-          function: z.object({
-            name: z.literal('get_date'),
-          }),
-        }),
-      )
-      .optional(),
+    tool_calls: z.array(ToolCallSchema).optional(),
   }),
 });
 
@@ -27,9 +33,11 @@ type GenerateResponse = z.output<typeof GenerateResponseSchema>;
 
 export class Model {
   private readonly credentials: OllamaCredentials;
+  private readonly tolokaClient: TolokaClient;
 
-  constructor(credentials: OllamaCredentials) {
+  constructor(credentials: OllamaCredentials, tolokaClient: TolokaClient) {
     this.credentials = credentials;
+    this.tolokaClient = tolokaClient;
   }
 
   async respond(message: string): Promise<string> {
@@ -57,6 +65,68 @@ export class Model {
                 description: 'Get the current date and time in ISO format.',
               },
             },
+            {
+              type: 'function',
+              function: {
+                name: 'search_torrents',
+                description: 'Search torrents (movies, series, music, etc...) on Toloka by query.',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    query: {
+                      type: 'string',
+                      description: 'Search query',
+                    },
+                  },
+                  required: ['query'],
+                },
+              },
+            },
+            {
+              type: 'function',
+              function: {
+                name: 'list_torrent_bookmarks',
+                description: 'List bookmarked torrent topics from Toloka.',
+                parameters: {
+                  type: 'object',
+                  properties: {},
+                },
+              },
+            },
+            {
+              type: 'function',
+              function: {
+                name: 'bookmark_torrent',
+                description: 'Add a torrent topic to Toloka bookmarks by topic ID.',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    topicId: {
+                      type: 'string',
+                      description: 'Topic id like t679577',
+                    },
+                  },
+                  required: ['topicId'],
+                },
+              },
+            },
+            {
+              type: 'function',
+              function: {
+                name: 'remove_torrent_bookmark',
+                description: 'Remove a torrent topic from Toloka bookmarks by topic ID.',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    topicId: {
+                      type: 'string',
+                      description: 'Topic id like t679577',
+                    },
+                  },
+                  required: ['topicId'],
+                },
+              },
+            },
           ],
           stream: false,
         }),
@@ -75,12 +145,85 @@ export class Model {
 
       if (responseMessage.message.tool_calls) {
         messages.push(responseMessage.message);
-        for (const toolCall of responseMessage.message.tool_calls ?? []) {
-          messages.push({ role: 'tool', content: new Date().toISOString() });
+        for (const toolCall of responseMessage.message.tool_calls) {
+          const toolResult = await this.executeToolCall(toolCall);
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify(toolResult),
+          });
         }
       }
     } while (responseMessage.message.tool_calls);
 
     return responseMessage.message.content;
   }
+
+  private async executeToolCall(toolCall: z.output<typeof ToolCallSchema>): Promise<unknown> {
+    console.log('ollama: executing tool call', { toolCall: JSON.stringify(toolCall) });
+
+    if (toolCall.function.name === 'get_date') {
+      return new Date().toISOString();
+    }
+
+    if (toolCall.function.name === 'search_torrents') {
+      const args = parseArguments(toolCall.function.arguments);
+      const parsed = z.object({ query: z.string().min(1) }).safeParse(args);
+
+      if (!parsed.success) {
+        return JSON.stringify({
+          error: 'Invalid arguments for search_torrents. Expected { query: string }',
+        });
+      }
+
+      return await this.tolokaClient.getSearchResultsMeta(parsed.data.query);
+    }
+
+    if (toolCall.function.name === 'list_torrent_bookmarks') {
+      return await this.tolokaClient.listBookmarkedTopics();
+    }
+
+    if (toolCall.function.name === 'bookmark_torrent') {
+      const args = parseArguments(toolCall.function.arguments);
+      const parsed = z.object({ topicId: z.string().min(1) }).safeParse(args);
+
+      if (!parsed.success) {
+        return {
+          error: 'Invalid arguments for bookmark_torrent. Expected { topicId: string }',
+        };
+      }
+
+      await this.tolokaClient.addTopicToBookmarks(parsed.data.topicId);
+      return { ok: true, action: 'bookmarked', topicId: parsed.data.topicId };
+    }
+
+    if (toolCall.function.name === 'remove_torrent_bookmark') {
+      const args = parseArguments(toolCall.function.arguments);
+      const parsed = z.object({ topicId: z.string().min(1) }).safeParse(args);
+
+      if (!parsed.success) {
+        return {
+          error: 'Invalid arguments for remove_torrent_bookmark. Expected { topicId: string }',
+        };
+      }
+
+      await this.tolokaClient.removeTopicFromBookmarks(parsed.data.topicId);
+      return { ok: true, action: 'removed', topicId: parsed.data.topicId };
+    }
+
+    return { error: `Unsupported tool: ${toolCall.function.name}` };
+  }
+}
+
+function parseArguments(
+  argumentsValue: z.output<typeof ToolCallSchema>['function']['arguments'],
+): unknown {
+  if (typeof argumentsValue === 'string') {
+    try {
+      return JSON.parse(argumentsValue);
+    } catch {
+      return {};
+    }
+  }
+
+  return argumentsValue ?? {};
 }
