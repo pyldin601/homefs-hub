@@ -1,10 +1,10 @@
 import 'dotenv/config';
 import { ConfigSchema, type Config } from './config';
-import { ModelClient } from './model-client';
+import { Model } from './model';
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
-import { SkillServerClient } from './skill-server-client';
-import { SkillOrchestrator } from './skill-orchestrator';
+import { FmtString } from 'telegraf/format';
+import { escapeMarkdownV2 } from './utils';
 
 const parseAllowedChatIds = (raw?: string): Set<number> | null => {
   if (!raw) {
@@ -22,14 +22,9 @@ const parseAllowedChatIds = (raw?: string): Set<number> | null => {
 const main = async (): Promise<void> => {
   const config: Config = ConfigSchema.parse(process.env);
   const allowedChatIds = parseAllowedChatIds(config.ALLOWED_CHAT_IDS);
-  const skillServerClient = new SkillServerClient(config.SKILL_SERVER_URL);
-  const modelClient = new ModelClient({
+  const modelClient = new Model({
     baseUrl: config.OLLAMA_BASE_URL,
     model: config.OLLAMA_MODEL,
-  });
-  const skillOrchestrator = new SkillOrchestrator({
-    modelClient,
-    skillServerClient,
   });
   const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
 
@@ -57,8 +52,11 @@ const main = async (): Promise<void> => {
           });
         });
       }, 3000);
-      const reply = await skillOrchestrator.run(text);
-      await ctx.reply(reply);
+      const reply = await modelClient.respond(text);
+      console.log('telegram: generated reply', { chatId, reply });
+      await ctx.reply(reply, {
+        parse_mode: 'Markdown',
+      });
     } catch (error) {
       console.error('telegram: failed to handle message', { chatId, error });
       await ctx.reply('Something went wrong. Please try again later.');
