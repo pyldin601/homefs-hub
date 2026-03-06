@@ -7,6 +7,14 @@ type OllamaCredentials = {
   model: string;
 };
 
+export type ConversationMessage = {
+  role: string;
+  content: string;
+  tool_calls?: z.output<typeof ToolCallSchema>[];
+};
+
+const MAX_HISTORY_MESSAGES = 20;
+
 const ToolCallSchema = z.object({
   id: z.string().optional(),
   function: z.object({
@@ -35,19 +43,17 @@ type GenerateResponse = z.output<typeof GenerateResponseSchema>;
 export class Model {
   private readonly credentials: OllamaCredentials;
   private readonly tolokaClient: TolokaClient;
+  private readonly chatHistories = new Map<number, ConversationMessage[]>();
 
   constructor(credentials: OllamaCredentials, tolokaClient: TolokaClient) {
     this.credentials = credentials;
     this.tolokaClient = tolokaClient;
   }
 
-  async respond(message: string): Promise<string> {
+  async respond(chatId: number, message: string): Promise<string> {
     const url = new URL('/api/chat', this.credentials.baseUrl);
-
-    const messages = [
-      { role: 'system', content: INSTRUCTION },
-      { role: 'user', content: message },
-    ];
+    const history = this.getOrInitHistory(chatId);
+    const messages: ConversationMessage[] = [...history, { role: 'user', content: message }];
 
     let responseMessage: GenerateResponse | null = null;
 
@@ -178,7 +184,22 @@ export class Model {
       }
     } while (responseMessage.message.tool_calls);
 
-    return responseMessage.message.content;
+    const reply = responseMessage.message.content;
+    messages.push(responseMessage.message);
+    this.chatHistories.set(chatId, trimHistory(messages));
+
+    return reply;
+  }
+
+  private getOrInitHistory(chatId: number): ConversationMessage[] {
+    const existing = this.chatHistories.get(chatId);
+    if (existing) {
+      return existing;
+    }
+
+    const initialHistory: ConversationMessage[] = [{ role: 'system', content: INSTRUCTION }];
+    this.chatHistories.set(chatId, initialHistory);
+    return initialHistory;
   }
 
   private async executeToolCall(toolCall: z.output<typeof ToolCallSchema>): Promise<unknown> {
@@ -263,6 +284,18 @@ export class Model {
 
     return { error: `Unsupported tool: ${toolCall.function.name}` };
   }
+}
+
+function trimHistory(history: ConversationMessage[]): ConversationMessage[] {
+  if (history.length <= MAX_HISTORY_MESSAGES) {
+    return history;
+  }
+  const [first, ...rest] = history;
+  if (!first) {
+    return history.slice(history.length - MAX_HISTORY_MESSAGES);
+  }
+
+  return [first, ...rest.slice(rest.length - (MAX_HISTORY_MESSAGES - 1))];
 }
 
 function parseArguments(

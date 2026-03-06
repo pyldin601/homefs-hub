@@ -60,7 +60,7 @@ const main = async (): Promise<void> => {
           });
         });
       }, 3000);
-      const reply = await modelClient.respond(text);
+      const reply = await modelClient.respond(chatId, text);
       console.log('telegram: generated reply', { chatId, reply });
       await ctx.reply(reply, {
         parse_mode: 'Markdown',
