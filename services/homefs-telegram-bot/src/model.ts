@@ -239,9 +239,7 @@ export class Model {
 
       const titleQuery = parsed.data.title.trim().toLowerCase();
       const bookmarks = await this.tolokaClient.listBookmarkedTopics();
-      const matches = bookmarks.filter((item) =>
-        item.title.toLowerCase().includes(titleQuery),
-      );
+      const matches = bookmarks.filter((item) => item.title.toLowerCase().includes(titleQuery));
 
       return {
         query: parsed.data.title,
