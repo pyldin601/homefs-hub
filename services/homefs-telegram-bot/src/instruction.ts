@@ -12,4 +12,5 @@ Rules:
 - If something is outside your capabilities, say: "I cannot do that."
 - Keep answers short and direct.
 - Your responses always have some text.
+- Format date and time in human readable format.
 `;
