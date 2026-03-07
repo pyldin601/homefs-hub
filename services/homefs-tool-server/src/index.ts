@@ -16,6 +16,50 @@ const SearchBookmarksByTitleArgsSchema = z.object({ title: z.string().min(1) }).
 const TopicIdArgsSchema = z.object({ topicId: z.string().min(1) }).strict();
 const EmptyArgsSchema = z.object({}).strict();
 
+const buildDateTimePayload = (): Record<string, unknown> => {
+  const now = new Date();
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const offsetMinutes = -now.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const absOffsetMinutes = Math.abs(offsetMinutes);
+  const offsetHoursPart = String(Math.floor(absOffsetMinutes / 60)).padStart(2, '0');
+  const offsetMinutesPart = String(absOffsetMinutes % 60).padStart(2, '0');
+  const utcOffset = `${sign}${offsetHoursPart}:${offsetMinutesPart}`;
+  const unixMilliseconds = now.getTime();
+  const unixSeconds = Math.floor(unixMilliseconds / 1000);
+  const isoString = now.toISOString();
+
+  return {
+    iso: isoString,
+    local: {
+      date: now.toLocaleDateString('en-CA'),
+      time: now.toLocaleTimeString('en-GB', { hour12: false }),
+      datetime: now.toLocaleString('sv-SE', { hour12: false }),
+      timezone: tz,
+      utcOffset,
+    },
+    utc: {
+      date: isoString.slice(0, 10),
+      time: isoString.slice(11, 19),
+      datetime: isoString.slice(0, 19),
+    },
+    unix: {
+      seconds: unixSeconds,
+      milliseconds: unixMilliseconds,
+    },
+    parts: {
+      year: now.getFullYear(),
+      month: now.getMonth() + 1,
+      day: now.getDate(),
+      weekday: now.getDay(),
+      hour: now.getHours(),
+      minute: now.getMinutes(),
+      second: now.getSeconds(),
+      millisecond: now.getMilliseconds(),
+    },
+  };
+};
+
 const parseToolArguments = (argumentsValue: OllamaToolCall['function']['arguments']): unknown => {
   if (typeof argumentsValue === 'string') {
     try {
@@ -38,7 +82,7 @@ const executeToolCall = async (
       return { error: 'Invalid arguments for get_date. Expected {}' };
     }
 
-    return new Date().toISOString();
+    return buildDateTimePayload();
   }
 
   if (toolCall.function.name === 'search_torrents') {

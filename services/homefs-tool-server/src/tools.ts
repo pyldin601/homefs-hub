@@ -5,7 +5,8 @@ export const tools = [
     type: 'function',
     function: {
       name: 'get_date',
-      description: 'Get the current date and time in ISO format.',
+      description:
+        'Get detailed current date and time data, including ISO, local and UTC values, timezone, unix timestamps, and date/time parts.',
       parameters: {
         type: 'object',
         properties: {},
