@@ -47,6 +47,11 @@ export class RedisService {
     return messages;
   }
 
+  async clearChatMessages(chatId: number): Promise<void> {
+    const key = this.chatKey(chatId);
+    await this.client.del(key);
+  }
+
   private chatKey(chatId: number): string {
     return `${this.keyPrefix}:${chatId}`;
   }

@@ -14,6 +14,23 @@ type OllamaCredentials = {
   model: string;
 };
 
+const ClearChatHistoryArgsSchema = z.object({}).strict();
+
+const LOCAL_TOOLS: ReadonlyArray<OllamaTool> = [
+  {
+    type: 'function',
+    function: {
+      name: 'clear_chat_history',
+      description: 'Clear the current chat history stored in Redis.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+  },
+];
+
 const GenerateResponseSchema = z.object({
   message: z.object({
     role: z.string(),
@@ -96,7 +113,7 @@ export class Model {
       }
 
       for (const toolCall of responseMessage.message.tool_calls) {
-        const toolResult = await this.executeToolCall(toolCall);
+        const toolResult = await this.executeToolCall(chatId, toolCall);
         await this.redisService.addMessageToChat(chatId, {
           role: 'tool',
           content: JSON.stringify(toolResult),
@@ -124,11 +141,27 @@ export class Model {
       throw new Error(`Tool server /tools returned invalid response: ${parsed.error.message}`);
     }
 
-    return parsed.data.tools;
+    return [...parsed.data.tools, ...LOCAL_TOOLS];
   }
 
-  private async executeToolCall(toolCall: z.output<typeof OllamaToolCallSchema>): Promise<unknown> {
+  private async executeToolCall(
+    chatId: number,
+    toolCall: z.output<typeof OllamaToolCallSchema>,
+  ): Promise<unknown> {
     console.log('ollama: executing tool call', { toolCall: JSON.stringify(toolCall) });
+
+    if (toolCall.function.name === 'clear_chat_history') {
+      const args = parseToolArguments(toolCall.function.arguments);
+      const parsed = ClearChatHistoryArgsSchema.safeParse(args);
+      if (!parsed.success) {
+        return {
+          error: 'Invalid arguments for clear_chat_history. Expected {}',
+        };
+      }
+
+      await this.redisService.clearChatMessages(chatId);
+      return { ok: true, action: 'cleared_chat_history' };
+    }
 
     try {
       const response = await fetch(new URL('/tools/call', this.toolServerUrl), {
@@ -162,3 +195,17 @@ export class Model {
     }
   }
 }
+
+const parseToolArguments = (
+  argumentsValue: z.output<typeof OllamaToolCallSchema>['function']['arguments'],
+): unknown => {
+  if (typeof argumentsValue === 'string') {
+    try {
+      return JSON.parse(argumentsValue);
+    } catch {
+      return {};
+    }
+  }
+
+  return argumentsValue ?? {};
+};
