@@ -55,9 +55,7 @@ const main = async (): Promise<void> => {
       }, 3000);
       const reply = await modelClient.respond(chatId, text);
       console.log('telegram: generated reply', { chatId, reply });
-      await ctx.reply(reply, {
-        parse_mode: 'Markdown',
-      });
+      await ctx.reply(reply);
     } catch (error) {
       console.error('telegram: failed to handle message', { chatId, error });
       await ctx.reply('Something went wrong. Please try again later.');
