@@ -86,10 +86,10 @@ export class Model {
         role: 'user',
         content: message,
       });
+      let history = await this.redisService.getChatMessages(chatId);
 
       let isWaitingForToolResult = true;
       while (isWaitingForToolResult) {
-        const history = await this.redisService.getChatMessages(chatId);
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -117,13 +117,20 @@ export class Model {
           return responseMessage.message.content;
         }
 
+        const toolMessages: ConversationMessage[] = [];
         for (const toolCall of responseMessage.message.tool_calls) {
           const toolResult = await this.executeToolCall(chatId, toolCall);
-          await this.redisService.addMessageToChat(chatId, {
+          toolMessages.push({
             role: 'tool',
             content: JSON.stringify(toolResult),
           });
         }
+
+        for (const toolMessage of toolMessages) {
+          await this.redisService.addMessageToChat(chatId, toolMessage);
+        }
+
+        history = await this.redisService.getChatMessages(chatId);
       }
 
       throw new Error('unreachable: model loop ended without a response');
@@ -141,17 +148,9 @@ export class Model {
       messageCount: history.length,
       threshold: MAX_HISTORY_BEFORE_COMPACTION,
     });
-    await this.compactChatHistory(chatId, history);
-  }
-
-  private async compactChatHistory(chatId: number, history: ConversationMessage[]): Promise<void> {
-    if (history.length === 0) {
-      return;
-    }
 
     const summary = await this.summarizeHistory(history);
     await this.redisService.clearChatMessages(chatId);
-
     await this.redisService.addMessageToChat(chatId, {
       role: 'assistant',
       content: `Conversation summary:\\n${summary}`,

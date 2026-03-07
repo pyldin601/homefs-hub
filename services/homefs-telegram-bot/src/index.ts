@@ -4,6 +4,7 @@ import { Model } from './model';
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { logger } from './logger';
+import { ChatLockTimeoutError } from './redis';
 
 const parseAllowedChatIds = (raw?: string): Set<number> | null => {
   if (!raw) {
@@ -65,6 +66,14 @@ const main = async (): Promise<void> => {
       logger.info('telegram: generated reply', { chatId, reply });
       await ctx.reply(reply);
     } catch (error) {
+      if (error instanceof ChatLockTimeoutError) {
+        logger.warn('telegram: chat lock wait timeout', { chatId });
+        await ctx.reply(
+          'Your previous request is still being processed. Please wait a bit and try again.',
+        );
+        return;
+      }
+
       logger.error('telegram: failed to handle message', { chatId, error });
       await ctx.reply('Something went wrong. Please try again later.');
     } finally {

@@ -13,7 +13,7 @@
     "dotenv": "^16.4.5",
     "handlebars": "^4.7.8",
     "homefs-shared": "0.1.0",
-    "redis": "^4.7.0",
+    "ioredis": "^5.8.1",
     "redlock": "^5.0.0-beta.2",
     "telegraf": "^4.16.3",
     "winston": "^3.19.0",
