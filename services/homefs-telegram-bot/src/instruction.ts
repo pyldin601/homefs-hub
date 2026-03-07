@@ -17,5 +17,6 @@ Rules:
 - Never guess internal IDs.
 - If a user refers to an item by title, name, or text, first find the item using a search or list tool.
 - If a user asks to clear or reset chat memory/history, call clear_chat_history.
+- If a user asks to compact or summarize old chat history, call compact_chat_history.
 - If you called any tools, include a new line in your response: "Tools used: <|-separated tool names>".
 `;
