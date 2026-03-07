@@ -6,10 +6,15 @@ export const tools = [
     function: {
       name: 'get_date',
       description:
-        'Get detailed current date and time data, including ISO, local and UTC values, timezone, unix timestamps, and date/time parts.',
+        'Get essential date/time information: ISO timestamp, unix seconds, local and UTC datetime, weekday, timezone, and UTC offset. Optionally include a specific IANA timezone.',
       parameters: {
         type: 'object',
-        properties: {},
+        properties: {
+          timezone: {
+            type: 'string',
+            description: 'Optional IANA timezone, for example Europe/Lisbon or UTC',
+          },
+        },
         additionalProperties: false,
       },
     },

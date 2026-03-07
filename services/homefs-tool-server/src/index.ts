@@ -14,49 +14,90 @@ import { tools } from './tools';
 const SearchTorrentsArgsSchema = z.object({ query: z.string().min(1) }).strict();
 const SearchBookmarksByTitleArgsSchema = z.object({ title: z.string().min(1) }).strict();
 const TopicIdArgsSchema = z.object({ topicId: z.string().min(1) }).strict();
+const GetDateArgsSchema = z.object({ timezone: z.string().min(1).optional() }).strict();
 const EmptyArgsSchema = z.object({}).strict();
 
-const buildDateTimePayload = (): Record<string, unknown> => {
-  const now = new Date();
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const offsetMinutes = -now.getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? '+' : '-';
-  const absOffsetMinutes = Math.abs(offsetMinutes);
-  const offsetHoursPart = String(Math.floor(absOffsetMinutes / 60)).padStart(2, '0');
-  const offsetMinutesPart = String(absOffsetMinutes % 60).padStart(2, '0');
-  const utcOffset = `${sign}${offsetHoursPart}:${offsetMinutesPart}`;
-  const unixMilliseconds = now.getTime();
-  const unixSeconds = Math.floor(unixMilliseconds / 1000);
-  const isoString = now.toISOString();
+const normalizeShortOffset = (value: string): string | null => {
+  const match = value.match(/^GMT([+-])(\d{1,2})(?::?(\d{2}))?$/);
+  if (!match) {
+    return null;
+  }
+
+  const sign = match[1];
+  const hours = match[2].padStart(2, '0');
+  const minutes = match[3] ?? '00';
+  return `${sign}${hours}:${minutes}`;
+};
+
+const getShortOffset = (now: Date, timezone: string): string | null =>
+  new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    timeZoneName: 'shortOffset',
+    hour: '2-digit',
+  })
+    .formatToParts(now)
+    .find((part) => part.type === 'timeZoneName')?.value ?? null;
+
+const formatInTimezone = (
+  now: Date,
+  timezone: string,
+): {
+  date: string;
+  time: string;
+  datetime: string;
+  weekday: string;
+  timezone: string;
+  utcOffset: string | null;
+} => {
+  const date = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+  const time = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(now);
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    weekday: 'long',
+  }).format(now);
+  const shortOffset = getShortOffset(now, timezone);
 
   return {
-    iso: isoString,
-    local: {
-      date: now.toLocaleDateString('en-CA'),
-      time: now.toLocaleTimeString('en-GB', { hour12: false }),
-      datetime: now.toLocaleString('sv-SE', { hour12: false }),
-      timezone: tz,
-      utcOffset,
-    },
-    utc: {
-      date: isoString.slice(0, 10),
-      time: isoString.slice(11, 19),
-      datetime: isoString.slice(0, 19),
-    },
-    unix: {
-      seconds: unixSeconds,
-      milliseconds: unixMilliseconds,
-    },
-    parts: {
-      year: now.getFullYear(),
-      month: now.getMonth() + 1,
-      day: now.getDate(),
-      weekday: now.getDay(),
-      hour: now.getHours(),
-      minute: now.getMinutes(),
-      second: now.getSeconds(),
-      millisecond: now.getMilliseconds(),
-    },
+    date,
+    time,
+    datetime: `${date} ${time}`,
+    weekday,
+    timezone,
+    utcOffset: shortOffset ? normalizeShortOffset(shortOffset) : null,
+  };
+};
+
+const isValidTimezone = (timezone: string): boolean => {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const buildDateTimePayload = (timezone?: string): Record<string, unknown> => {
+  const now = new Date();
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const iso = now.toISOString();
+
+  return {
+    iso,
+    unixSeconds: Math.floor(now.getTime() / 1000),
+    local: formatInTimezone(now, tz),
+    utc: formatInTimezone(now, 'UTC'),
+    requestedTimezone: timezone ? formatInTimezone(now, timezone) : null,
   };
 };
 
@@ -77,12 +118,25 @@ const executeToolCall = async (
   tolokaClient: TolokaClient,
 ): Promise<unknown> => {
   if (toolCall.function.name === 'get_date') {
-    const parsed = EmptyArgsSchema.safeParse(parseToolArguments(toolCall.function.arguments));
+    const parsed = GetDateArgsSchema.safeParse(parseToolArguments(toolCall.function.arguments));
     if (!parsed.success) {
-      return { error: 'Invalid arguments for get_date. Expected {}' };
+      return {
+        error: 'Invalid arguments for get_date. Expected { timezone?: string }',
+      };
     }
 
-    return buildDateTimePayload();
+    if (parsed.data.timezone && !isValidTimezone(parsed.data.timezone)) {
+      return {
+        error:
+          'Invalid timezone for get_date. Expected a valid IANA timezone, for example "Europe/Lisbon".',
+      };
+    }
+
+    const date = buildDateTimePayload(parsed.data.timezone);
+
+    console.log('get_date: returning date', { date });
+
+    return date;
   }
 
   if (toolCall.function.name === 'search_torrents') {
