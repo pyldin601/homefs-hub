@@ -8,7 +8,8 @@
   "scripts": {
     "lint": "eslint . --ext .ts",
     "format": "prettier --check .",
-    "docker:test:homefs-telegram-bot": "docker build -f services/homefs-telegram-bot/Dockerfile -t homefs-telegram-bot:test ."
+    "docker:test:homefs-telegram-bot": "docker build -f services/homefs-telegram-bot/Dockerfile -t homefs-telegram-bot:test .",
+    "docker:test:homefs-tool-server": "docker build -f services/homefs-tool-server/Dockerfile -t homefs-tool-server:test ."
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
