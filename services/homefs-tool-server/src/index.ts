@@ -8,7 +8,7 @@ import {
   type OllamaToolCall,
 } from 'homefs-shared';
 import { ConfigSchema } from './config';
-import { logger } from './logger';
+import { logger, serializeError } from './logger';
 import { TolokaClient } from './toloka';
 import { tools } from './tools';
 
@@ -255,6 +255,6 @@ const main = async (): Promise<void> => {
 };
 
 main().catch((error) => {
-  logger.error('Fatal error in main()', { error });
+  logger.error('Fatal error in main()', { error: serializeError(error) });
   process.exitCode = 1;
 });

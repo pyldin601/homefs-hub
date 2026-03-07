@@ -1,7 +1,7 @@
 import Redis from 'ioredis';
 import Redlock from 'redlock';
 import { ConversationMessageSchema, type ConversationMessage } from './conversation';
-import { logger } from './logger';
+import { logger, serializeError } from './logger';
 
 export class ChatLockTimeoutError extends Error {
   constructor() {
@@ -33,11 +33,11 @@ export class RedisService {
     });
 
     this.client.on('error', (error) => {
-      logger.error('redis: client error', { error });
+      logger.error('redis: client error', { error: serializeError(error) });
     });
 
     this.redlockClient.on('error', (error) => {
-      logger.error('redis: redlock client error', { error });
+      logger.error('redis: redlock client error', { error: serializeError(error) });
     });
   }
 
@@ -72,7 +72,10 @@ export class RedisService {
         const parsed = ConversationMessageSchema.parse(json);
         messages.push(parsed);
       } catch (error) {
-        logger.warn('redis: invalid chat message skipped', { chatId, error });
+        logger.warn('redis: invalid chat message skipped', {
+          chatId,
+          error: serializeError(error),
+        });
       }
     }
 
@@ -99,7 +102,10 @@ export class RedisService {
       });
     } catch (error) {
       if (error instanceof Error && error.name === 'ExecutionError') {
-        logger.warn('redis: timed out waiting for chat lock', { chatId, error });
+        logger.warn('redis: timed out waiting for chat lock', {
+          chatId,
+          error: serializeError(error),
+        });
         throw new ChatLockTimeoutError();
       }
 

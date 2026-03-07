@@ -3,7 +3,7 @@ import { parseConfig, type Config } from './config';
 import { Model } from './model';
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
-import { logger } from './logger';
+import { logger, serializeError } from './logger';
 import { ChatLockTimeoutError } from './redis';
 
 const parseAllowedChatIds = (raw?: string): Set<number> | null => {
@@ -57,7 +57,7 @@ const main = async (): Promise<void> => {
         ctx.sendChatAction('typing').catch((error) => {
           logger.warn('telegram: failed to refresh typing indicator', {
             chatId,
-            error,
+            error: serializeError(error),
           });
         });
       }, 3000);
@@ -74,7 +74,7 @@ const main = async (): Promise<void> => {
         return;
       }
 
-      logger.error('telegram: failed to handle message', { chatId, error });
+      logger.error('telegram: failed to handle message', { chatId, error: serializeError(error) });
       await ctx.reply('Something went wrong. Please try again later.');
     } finally {
       if (typingInterval) {
@@ -97,6 +97,6 @@ const main = async (): Promise<void> => {
 };
 
 main().catch((error) => {
-  logger.error('Fatal error in main()', { error });
+  logger.error('Fatal error in main()', { error: serializeError(error) });
   process.exitCode = 1;
 });
