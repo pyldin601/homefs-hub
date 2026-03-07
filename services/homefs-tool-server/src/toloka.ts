@@ -7,6 +7,8 @@ export type TopicMeta = {
   topicId: string;
   title: string;
   category: TolokaCategory;
+  seeds?: number;
+  peers?: number;
 };
 
 export type DownloadMeta = {
@@ -234,7 +236,7 @@ function splitSetCookieHeader(value: string): string[] {
   return value.split(/,(?=[^;]+=[^;]+)/g).map((item) => item.trim());
 }
 
-function parseWatchedTopicsMeta(document: string): TopicMeta[] {
+export function parseWatchedTopicsMeta(document: string): TopicMeta[] {
   const rows = extractRows(document);
   const topics: TopicMeta[] = [];
 
@@ -249,7 +251,7 @@ function parseWatchedTopicsMeta(document: string): TopicMeta[] {
       continue;
     }
 
-    const categoryRaw = extractFirstAnchorText(columns[1] ?? '') ?? '';
+    const categoryRaw = extractFirstAnchorText(columns[1] ?? '') ?? cleanText(columns[1] ?? '');
 
     topics.push({
       topicId: topicLink.topicId,
@@ -261,12 +263,13 @@ function parseWatchedTopicsMeta(document: string): TopicMeta[] {
   return topics;
 }
 
-function parseSearchResultsMeta(document: string): TopicMeta[] {
+export function parseSearchResultsMeta(document: string): TopicMeta[] {
   const rows = extractRows(document);
   const topics: TopicMeta[] = [];
 
   for (const row of rows) {
-    const columns = extractColumns(row);
+    const cells = extractColumnCells(row);
+    const columns = cells.map((cell) => cell.html);
     if (columns.length < 3) {
       continue;
     }
@@ -278,18 +281,21 @@ function parseSearchResultsMeta(document: string): TopicMeta[] {
 
     const categoryRaw = extractFirstAnchorText(columns[1] ?? '') ?? '';
     const title = extractBoldText(topicLink.raw) ?? topicLink.title;
+    const swarmStats = extractSwarmStats(cells);
 
     topics.push({
       topicId: topicLink.topicId,
       title,
       category: parseCategory(categoryRaw),
+      ...(swarmStats.seeds !== null ? { seeds: swarmStats.seeds } : {}),
+      ...(swarmStats.peers !== null ? { peers: swarmStats.peers } : {}),
     });
   }
 
   return topics;
 }
 
-function parseDownloadMeta(document: string): DownloadMeta | null {
+export function parseDownloadMeta(document: string): DownloadMeta | null {
   const downloadMatch = document.match(/class=["']piwik_download["'][^>]*href=["']([^"']+)["']/i);
   if (!downloadMatch) {
     return null;
@@ -309,7 +315,26 @@ function parseDownloadMeta(document: string): DownloadMeta | null {
 }
 
 function extractRegisteredAt(document: string): string {
-  const dateMatch = document.match(/\b\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\b/);
+  const btTableMatch = document.match(
+    /<table\b[^>]*\bclass=(?:"[^"]*\bbtTbl\b[^"]*"|'[^']*\bbtTbl\b[^']*'|[^\s>]*\bbtTbl\b[^\s>]*)[^>]*>([\s\S]*?)<\/table>/i,
+  );
+  if (!btTableMatch) {
+    return '';
+  }
+
+  const rows = [
+    ...btTableMatch[1].matchAll(/<tr\b[^>]*\bclass=["']row4_to["'][^>]*>([\s\S]*?)<\/tr>/gi),
+  ];
+  if (rows.length < 2) {
+    return '';
+  }
+
+  const columns = extractColumns(rows[1]?.[1] ?? '');
+  if (columns.length < 2) {
+    return '';
+  }
+
+  const dateMatch = cleanText(columns[1] ?? '').match(/\b\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\b/);
   return dateMatch?.[0] ?? '';
 }
 
@@ -363,6 +388,13 @@ function extractColumns(rowHtml: string): string[] {
   return [...rowHtml.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)].map((m) => m[1]);
 }
 
+function extractColumnCells(rowHtml: string): Array<{ attributes: string; html: string }> {
+  return [...rowHtml.matchAll(/<td\b([^>]*)>([\s\S]*?)<\/td>/gi)].map((m) => ({
+    attributes: m[1] ?? '',
+    html: m[2] ?? '',
+  }));
+}
+
 function extractFirstHref(html: string): { href: string; text: string; raw: string } | null {
   const match = html.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
   if (!match) {
@@ -411,6 +443,56 @@ function extractBoldText(html: string): string | null {
 function extractFirstAnchorText(html: string): string | null {
   const link = extractFirstHref(html);
   return link ? link.text : null;
+}
+
+function extractInteger(text: string): number | null {
+  const normalized = text.replace(/[^\d]/g, '');
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  const value = Number.parseInt(normalized, 10);
+  return Number.isFinite(value) ? value : null;
+}
+
+function extractSwarmStats(cells: Array<{ attributes: string; html: string }>): {
+  seeds: number | null;
+  peers: number | null;
+} {
+  let seeds: number | null = null;
+  let peers: number | null = null;
+
+  for (const cell of cells) {
+    const attrs = cell.attributes.toLowerCase();
+    const value = extractInteger(cleanText(cell.html));
+    if (value === null) {
+      continue;
+    }
+
+    if (seeds === null && (attrs.includes('seed') || attrs.includes('seeder'))) {
+      seeds = value;
+      continue;
+    }
+
+    if (peers === null && (attrs.includes('leech') || attrs.includes('peer'))) {
+      peers = value;
+    }
+  }
+
+  // Fallback: if class names are missing, pick trailing numeric columns.
+  if (seeds === null || peers === null) {
+    const trailingNumbers = cells
+      .map((cell) => extractInteger(cleanText(cell.html)))
+      .filter((value): value is number => value !== null)
+      .slice(-2);
+
+    if (trailingNumbers.length === 2) {
+      seeds = seeds ?? trailingNumbers[0];
+      peers = peers ?? trailingNumbers[1];
+    }
+  }
+
+  return { seeds, peers };
 }
 
 function cleanText(html: string): string {
