@@ -1,3 +1,5 @@
+import { logger } from './logger';
+
 const TOLOKA_HOST = 'https://toloka.to';
 const DEFAULT_TIMEOUT_MS = 15_000;
 
@@ -98,7 +100,10 @@ export class TolokaClient {
     }
 
     const document = await response.text();
-    console.log('Search results:', document);
+    logger.debug('toloka: search results received', {
+      query,
+      contentLength: document.length,
+    });
     return parseSearchResultsMeta(document);
   }
 

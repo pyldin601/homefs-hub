@@ -1,16 +1,24 @@
 import { createClient, type RedisClientType } from 'redis';
+import Redlock from 'redlock';
 import { ConversationMessageSchema, type ConversationMessage } from './conversation';
+import { logger } from './logger';
 
 export class RedisService {
   private readonly client: RedisClientType;
   private readonly keyPrefix: string;
+  private readonly redlock: Redlock;
 
   constructor(options: { redisUrl: string; keyPrefix: string }) {
     this.client = createClient({ url: options.redisUrl });
     this.keyPrefix = options.keyPrefix;
+    this.redlock = new Redlock([this.client], {
+      retryCount: 20,
+      retryDelay: 100,
+      retryJitter: 100,
+    });
 
     this.client.on('error', (error) => {
-      console.error('redis: client error', { error });
+      logger.error('redis: client error', { error });
     });
   }
 
@@ -40,7 +48,7 @@ export class RedisService {
         const parsed = ConversationMessageSchema.parse(json);
         messages.push(parsed);
       } catch (error) {
-        console.warn('redis: invalid chat message skipped', { chatId, error });
+        logger.warn('redis: invalid chat message skipped', { chatId, error });
       }
     }
 
@@ -52,7 +60,20 @@ export class RedisService {
     await this.client.del(key);
   }
 
+  async withChatLock<T>(chatId: number, callback: () => Promise<T>): Promise<T> {
+    const lock = await this.redlock.acquire([this.chatLockKey(chatId)], 300_000);
+    try {
+      return await callback();
+    } finally {
+      await lock.release();
+    }
+  }
+
   private chatKey(chatId: number): string {
     return `${this.keyPrefix}:${chatId}`;
+  }
+
+  private chatLockKey(chatId: number): string {
+    return `${this.keyPrefix}:lock:${chatId}`;
   }
 }

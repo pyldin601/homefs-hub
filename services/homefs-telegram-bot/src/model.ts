@@ -7,6 +7,7 @@ import {
 } from 'homefs-shared';
 import type { ConversationMessage } from './conversation';
 import { INSTRUCTION } from './instruction';
+import { logger } from './logger';
 import { RedisService } from './redis';
 
 type OllamaCredentials = {
@@ -15,9 +16,7 @@ type OllamaCredentials = {
 };
 
 const ClearChatHistoryArgsSchema = z.object({}).strict();
-const CompactChatHistoryArgsSchema = z.object({}).strict();
-const MAX_HISTORY_BEFORE_COMPACTION = 50;
-const RECENT_MESSAGES_TO_KEEP_AFTER_COMPACTION = 10;
+const MAX_HISTORY_BEFORE_COMPACTION = 20;
 
 const LOCAL_TOOLS: ReadonlyArray<OllamaTool> = [
   {
@@ -25,19 +24,6 @@ const LOCAL_TOOLS: ReadonlyArray<OllamaTool> = [
     function: {
       name: 'clear_chat_history',
       description: 'Clear the current chat history stored in Redis.',
-      parameters: {
-        type: 'object',
-        properties: {},
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'compact_chat_history',
-      description:
-        'Compact older chat history into a concise summary while keeping recent messages.',
       parameters: {
         type: 'object',
         properties: {},
@@ -90,83 +76,80 @@ export class Model {
   }
 
   async respond(chatId: number, message: string): Promise<string> {
-    const url = new URL('/api/chat', this.credentials.baseUrl);
-    const tools = await this.fetchTools();
-    const historyBeforeResponse = await this.redisService.getChatMessages(chatId);
+    return await this.redisService.withChatLock(chatId, async () => {
+      const url = new URL('/api/chat', this.credentials.baseUrl);
+      const tools = await this.fetchTools();
 
-    if (historyBeforeResponse.length > MAX_HISTORY_BEFORE_COMPACTION) {
-      await this.compactChatHistory(chatId, historyBeforeResponse);
-    }
+      await this.compactHistoryIfNeeded(chatId);
 
-    await this.redisService.addMessageToChat(chatId, {
-      role: 'user',
-      content: message,
-    });
-
-    let isWaitingForToolResult = true;
-    while (isWaitingForToolResult) {
-      const history = await this.redisService.getChatMessages(chatId);
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model: this.credentials.model,
-          messages: [initialSystemMessage(), ...history],
-          tools,
-          stream: false,
-        }),
+      await this.redisService.addMessageToChat(chatId, {
+        role: 'user',
+        content: message,
       });
 
-      if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`Ollama request failed with status ${response.status}: ${body}`);
-      }
-
-      const json = await response.json();
-      console.log('ollama: received response', { json: JSON.stringify(json) });
-
-      const responseMessage: GenerateResponse = GenerateResponseSchema.parse(json);
-      await this.redisService.addMessageToChat(chatId, responseMessage.message);
-
-      if (!responseMessage.message.tool_calls) {
-        isWaitingForToolResult = false;
-        return responseMessage.message.content;
-      }
-
-      for (const toolCall of responseMessage.message.tool_calls) {
-        const toolResult = await this.executeToolCall(chatId, toolCall);
-        await this.redisService.addMessageToChat(chatId, {
-          role: 'tool',
-          content: JSON.stringify(toolResult),
+      let isWaitingForToolResult = true;
+      while (isWaitingForToolResult) {
+        const history = await this.redisService.getChatMessages(chatId);
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: this.credentials.model,
+            messages: [initialSystemMessage(), ...history],
+            tools,
+            stream: false,
+          }),
         });
-      }
-    }
 
-    throw new Error('unreachable: model loop ended without a response');
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(`Ollama request failed with status ${response.status}: ${body}`);
+        }
+
+        const json = await response.json();
+        logger.debug('ollama: received response', { json: JSON.stringify(json) });
+
+        const responseMessage: GenerateResponse = GenerateResponseSchema.parse(json);
+        await this.redisService.addMessageToChat(chatId, responseMessage.message);
+
+        if (!responseMessage.message.tool_calls) {
+          isWaitingForToolResult = false;
+          return responseMessage.message.content;
+        }
+
+        for (const toolCall of responseMessage.message.tool_calls) {
+          const toolResult = await this.executeToolCall(chatId, toolCall);
+          await this.redisService.addMessageToChat(chatId, {
+            role: 'tool',
+            content: JSON.stringify(toolResult),
+          });
+        }
+      }
+
+      throw new Error('unreachable: model loop ended without a response');
+    });
   }
 
-  private async compactChatHistory(
-    chatId: number,
-    history: ConversationMessage[],
-  ): Promise<{
-    ok: true;
-    action: 'compacted_chat_history';
-    compactedFrom: number;
-    keptRecent: number;
-  }> {
-    const recentMessages = history.slice(-RECENT_MESSAGES_TO_KEEP_AFTER_COMPACTION);
-    const olderMessages = history.slice(0, -RECENT_MESSAGES_TO_KEEP_AFTER_COMPACTION);
-
-    if (olderMessages.length === 0) {
-      return {
-        ok: true,
-        action: 'compacted_chat_history',
-        compactedFrom: history.length,
-        keptRecent: recentMessages.length,
-      };
+  private async compactHistoryIfNeeded(chatId: number): Promise<void> {
+    const history = await this.redisService.getChatMessages(chatId);
+    if (history.length <= MAX_HISTORY_BEFORE_COMPACTION) {
+      return;
     }
 
-    const summary = await this.summarizeHistory(olderMessages);
+    logger.info('history: auto-compaction triggered', {
+      chatId,
+      messageCount: history.length,
+      threshold: MAX_HISTORY_BEFORE_COMPACTION,
+    });
+    await this.compactChatHistory(chatId, history);
+  }
+
+  private async compactChatHistory(chatId: number, history: ConversationMessage[]): Promise<void> {
+    if (history.length === 0) {
+      return;
+    }
+
+    const summary = await this.summarizeHistory(history);
     await this.redisService.clearChatMessages(chatId);
 
     await this.redisService.addMessageToChat(chatId, {
@@ -174,16 +157,11 @@ export class Model {
       content: `Conversation summary:\\n${summary}`,
     });
 
-    for (const item of recentMessages) {
-      await this.redisService.addMessageToChat(chatId, item);
-    }
-
-    return {
-      ok: true,
-      action: 'compacted_chat_history',
+    logger.info('history: auto-compaction completed', {
+      chatId,
       compactedFrom: history.length,
-      keptRecent: recentMessages.length,
-    };
+      keptMessages: 1,
+    });
   }
 
   private async summarizeHistory(messages: ConversationMessage[]): Promise<string> {
@@ -242,7 +220,7 @@ export class Model {
     chatId: number,
     toolCall: z.output<typeof OllamaToolCallSchema>,
   ): Promise<unknown> {
-    console.log('ollama: executing tool call', { toolCall: JSON.stringify(toolCall) });
+    logger.info('ollama: executing tool call', { toolCall: JSON.stringify(toolCall) });
 
     if (toolCall.function.name === 'clear_chat_history') {
       const args = parseToolArguments(toolCall.function.arguments);
@@ -255,23 +233,6 @@ export class Model {
 
       await this.redisService.clearChatMessages(chatId);
       return { ok: true, action: 'cleared_chat_history' };
-    }
-
-    if (toolCall.function.name === 'compact_chat_history') {
-      const args = parseToolArguments(toolCall.function.arguments);
-      const parsed = CompactChatHistoryArgsSchema.safeParse(args);
-      if (!parsed.success) {
-        return {
-          error: 'Invalid arguments for compact_chat_history. Expected {}',
-        };
-      }
-
-      const history = await this.redisService.getChatMessages(chatId);
-      if (history.length === 0) {
-        return { ok: true, action: 'compacted_chat_history', compactedFrom: 0, keptRecent: 0 };
-      }
-
-      return await this.compactChatHistory(chatId, history);
     }
 
     try {

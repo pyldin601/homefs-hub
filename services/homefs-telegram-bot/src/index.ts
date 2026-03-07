@@ -3,6 +3,7 @@ import { parseConfig, type Config } from './config';
 import { Model } from './model';
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
+import { logger } from './logger';
 
 const parseAllowedChatIds = (raw?: string): Set<number> | null => {
   if (!raw) {
@@ -42,18 +43,18 @@ const main = async (): Promise<void> => {
 
     try {
       if (allowedChatIds && !allowedChatIds.has(chatId)) {
-        console.warn('telegram: blocked message from unapproved chat', {
+        logger.warn('telegram: blocked message from unapproved chat', {
           chatId,
         });
         await ctx.reply('This bot is not authorized for this chat.');
         return;
       }
 
-      console.log('telegram: received message', { chatId, text });
+      logger.info('telegram: received message', { chatId, text });
       // Keep the typing indicator visible while the model is generating.
       typingInterval = setInterval(() => {
         ctx.sendChatAction('typing').catch((error) => {
-          console.warn('telegram: failed to refresh typing indicator', {
+          logger.warn('telegram: failed to refresh typing indicator', {
             chatId,
             error,
           });
@@ -61,10 +62,10 @@ const main = async (): Promise<void> => {
       }, 3000);
 
       const reply = await modelClient.respond(chatId, text);
-      console.log('telegram: generated reply', { chatId, reply });
+      logger.info('telegram: generated reply', { chatId, reply });
       await ctx.reply(reply);
     } catch (error) {
-      console.error('telegram: failed to handle message', { chatId, error });
+      logger.error('telegram: failed to handle message', { chatId, error });
       await ctx.reply('Something went wrong. Please try again later.');
     } finally {
       if (typingInterval) {
@@ -87,6 +88,6 @@ const main = async (): Promise<void> => {
 };
 
 main().catch((error) => {
-  console.error('Fatal error in main()', error);
+  logger.error('Fatal error in main()', { error });
   process.exitCode = 1;
 });

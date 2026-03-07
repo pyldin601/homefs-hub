@@ -8,6 +8,7 @@ import {
   type OllamaToolCall,
 } from 'homefs-shared';
 import { ConfigSchema } from './config';
+import { logger } from './logger';
 import { TolokaClient } from './toloka';
 import { tools } from './tools';
 
@@ -134,7 +135,7 @@ const executeToolCall = async (
 
     const date = buildDateTimePayload(parsed.data.timezone);
 
-    console.log('get_date: returning date', { date });
+    logger.debug('get_date: returning date', { date });
 
     return date;
   }
@@ -249,11 +250,11 @@ const main = async (): Promise<void> => {
 
   const port = config.PORT ?? 3000;
   app.listen(port, () => {
-    console.log(`homefs-tool-server listening on ${port}`);
+    logger.info('homefs-tool-server listening', { port });
   });
 };
 
 main().catch((error) => {
-  console.error('Fatal error in main()', error);
+  logger.error('Fatal error in main()', { error });
   process.exitCode = 1;
 });
