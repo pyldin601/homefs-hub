@@ -35,7 +35,9 @@ const main = async (): Promise<void> => {
 
   await modelClient.connect();
 
-  const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
+  const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN, {
+    handlerTimeout: 30 * 60 * 1000,
+  });
 
   bot.on(message('text'), async (ctx) => {
     const text = ctx.message.text.trim();
@@ -81,6 +83,13 @@ const main = async (): Promise<void> => {
         clearInterval(typingInterval);
       }
     }
+  });
+
+  bot.catch((error, ctx) => {
+    logger.error('telegram: unhandled middleware error', {
+      chatId: ctx.chat?.id,
+      error: serializeError(error),
+    });
   });
 
   await bot.launch();
