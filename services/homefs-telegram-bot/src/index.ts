@@ -28,6 +28,7 @@ const main = async (): Promise<void> => {
     },
     config.TOOL_SERVER_URL,
     config.REDIS_URL,
+    config.REDIS_KEY_PREFIX,
   );
 
   await modelClient.connect();

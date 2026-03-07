@@ -34,12 +34,17 @@ export class Model {
   private readonly toolServerUrl: string;
   private readonly redisService: RedisService;
 
-  constructor(credentials: OllamaCredentials, toolServerUrl: string, redisUrl: string) {
+  constructor(
+    credentials: OllamaCredentials,
+    toolServerUrl: string,
+    redisUrl: string,
+    redisKeyPrefix: string,
+  ) {
     this.credentials = credentials;
     this.toolServerUrl = toolServerUrl;
     this.redisService = new RedisService({
       redisUrl,
-      keyPrefix: 'homefs:telegram:history',
+      keyPrefix: redisKeyPrefix,
     });
   }
 

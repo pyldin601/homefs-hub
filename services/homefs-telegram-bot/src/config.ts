@@ -4,6 +4,7 @@ export const ConfigSchema = z.object({
   OLLAMA_BASE_URL: z.string().url(),
   OLLAMA_MODEL: z.string().min(1),
   REDIS_URL: z.string().url(),
+  REDIS_KEY_PREFIX: z.string().min(1),
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   ALLOWED_CHAT_IDS: z.string().optional(),
   TOOL_SERVER_URL: z.string().url(),
