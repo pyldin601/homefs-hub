@@ -2,7 +2,8 @@
   "name": "homefs-hub",
   "private": true,
   "workspaces": [
-    "services/*"
+    "services/*",
+    "packages/*"
   ],
   "scripts": {
     "lint": "eslint . --ext .ts",
