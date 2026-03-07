@@ -7,7 +7,8 @@
   ],
   "scripts": {
     "lint": "eslint . --ext .ts",
-    "format": "prettier --check ."
+    "format": "prettier --check .",
+    "docker:test:homefs-telegram-bot": "docker build -f services/homefs-telegram-bot/Dockerfile -t homefs-telegram-bot:test ."
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
