@@ -5,20 +5,14 @@ import {
   ToolCallResponseSchema,
   type OllamaTool,
 } from 'homefs-shared';
+import type { ConversationMessage } from './conversation';
 import { INSTRUCTION } from './instruction';
+import { RedisService } from './redis';
 
 type OllamaCredentials = {
   baseUrl: string;
   model: string;
 };
-
-export type ConversationMessage = {
-  role: string;
-  content: string;
-  tool_calls?: z.output<typeof OllamaToolCallSchema>[];
-};
-
-const MAX_HISTORY_MESSAGES = 20;
 
 const GenerateResponseSchema = z.object({
   message: z.object({
@@ -30,31 +24,51 @@ const GenerateResponseSchema = z.object({
 
 type GenerateResponse = z.output<typeof GenerateResponseSchema>;
 
+const initialSystemMessage = (): ConversationMessage => ({
+  role: 'system',
+  content: INSTRUCTION,
+});
+
 export class Model {
   private readonly credentials: OllamaCredentials;
   private readonly toolServerUrl: string;
-  private readonly chatHistories = new Map<number, ConversationMessage[]>();
+  private readonly redisService: RedisService;
 
-  constructor(credentials: OllamaCredentials, toolServerUrl: string) {
+  constructor(credentials: OllamaCredentials, toolServerUrl: string, redisUrl: string) {
     this.credentials = credentials;
     this.toolServerUrl = toolServerUrl;
+    this.redisService = new RedisService({
+      redisUrl,
+      keyPrefix: 'homefs:telegram:history',
+    });
+  }
+
+  async connect(): Promise<void> {
+    await this.redisService.connect();
+  }
+
+  async close(): Promise<void> {
+    await this.redisService.close();
   }
 
   async respond(chatId: number, message: string): Promise<string> {
     const url = new URL('/api/chat', this.credentials.baseUrl);
     const tools = await this.fetchTools();
-    const history = this.getOrInitHistory(chatId);
-    const messages: ConversationMessage[] = [...history, { role: 'user', content: message }];
 
-    let responseMessage: GenerateResponse | null = null;
+    await this.redisService.addMessageToChat(chatId, {
+      role: 'user',
+      content: message,
+    });
 
-    do {
+    let isWaitingForToolResult = true;
+    while (isWaitingForToolResult) {
+      const history = await this.redisService.getChatMessages(chatId);
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           model: this.credentials.model,
-          messages,
+          messages: [initialSystemMessage(), ...history],
           tools,
           stream: false,
         }),
@@ -66,39 +80,26 @@ export class Model {
       }
 
       const json = await response.json();
-
       console.log('ollama: received response', { json: JSON.stringify(json) });
 
-      responseMessage = GenerateResponseSchema.parse(json);
+      const responseMessage: GenerateResponse = GenerateResponseSchema.parse(json);
+      await this.redisService.addMessageToChat(chatId, responseMessage.message);
 
-      if (responseMessage.message.tool_calls) {
-        messages.push(responseMessage.message);
-        for (const toolCall of responseMessage.message.tool_calls) {
-          const toolResult = await this.executeToolCall(toolCall);
-          messages.push({
-            role: 'tool',
-            content: JSON.stringify(toolResult),
-          });
-        }
+      if (!responseMessage.message.tool_calls) {
+        isWaitingForToolResult = false;
+        return responseMessage.message.content;
       }
-    } while (responseMessage.message.tool_calls);
 
-    const reply = responseMessage.message.content;
-    messages.push(responseMessage.message);
-    this.chatHistories.set(chatId, trimHistory(messages));
-
-    return reply;
-  }
-
-  private getOrInitHistory(chatId: number): ConversationMessage[] {
-    const existing = this.chatHistories.get(chatId);
-    if (existing) {
-      return existing;
+      for (const toolCall of responseMessage.message.tool_calls) {
+        const toolResult = await this.executeToolCall(toolCall);
+        await this.redisService.addMessageToChat(chatId, {
+          role: 'tool',
+          content: JSON.stringify(toolResult),
+        });
+      }
     }
 
-    const initialHistory: ConversationMessage[] = [{ role: 'system', content: INSTRUCTION }];
-    this.chatHistories.set(chatId, initialHistory);
-    return initialHistory;
+    throw new Error('unreachable: model loop ended without a response');
   }
 
   private async fetchTools(): Promise<OllamaTool[]> {
@@ -155,16 +156,4 @@ export class Model {
       };
     }
   }
-}
-
-function trimHistory(history: ConversationMessage[]): ConversationMessage[] {
-  if (history.length <= MAX_HISTORY_MESSAGES) {
-    return history;
-  }
-  const [first, ...rest] = history;
-  if (!first) {
-    return history.slice(history.length - MAX_HISTORY_MESSAGES);
-  }
-
-  return [first, ...rest.slice(rest.length - (MAX_HISTORY_MESSAGES - 1))];
 }

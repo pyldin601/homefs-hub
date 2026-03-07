@@ -20,13 +20,18 @@ const parseAllowedChatIds = (raw?: string): Set<number> | null => {
 const main = async (): Promise<void> => {
   const config: Config = parseConfig(process.env);
   const allowedChatIds = parseAllowedChatIds(config.ALLOWED_CHAT_IDS);
+
   const modelClient = new Model(
     {
       baseUrl: config.OLLAMA_BASE_URL,
       model: config.OLLAMA_MODEL,
     },
     config.TOOL_SERVER_URL,
+    config.REDIS_URL,
   );
+
+  await modelClient.connect();
+
   const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
 
   bot.on(message('text'), async (ctx) => {
@@ -53,6 +58,7 @@ const main = async (): Promise<void> => {
           });
         });
       }, 3000);
+
       const reply = await modelClient.respond(chatId, text);
       console.log('telegram: generated reply', { chatId, reply });
       await ctx.reply(reply);
@@ -68,8 +74,15 @@ const main = async (): Promise<void> => {
 
   await bot.launch();
 
-  process.once('SIGINT', () => bot.stop('SIGINT'));
-  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+  process.once('SIGINT', () => {
+    void modelClient.close();
+    bot.stop('SIGINT');
+  });
+
+  process.once('SIGTERM', () => {
+    void modelClient.close();
+    bot.stop('SIGTERM');
+  });
 };
 
 main().catch((error) => {
