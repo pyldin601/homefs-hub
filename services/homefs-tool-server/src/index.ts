@@ -10,6 +10,7 @@ import {
 import { ConfigSchema } from './config';
 import { logger, serializeError } from './logger';
 import { TolokaClient } from './toloka';
+import { TransmissionClient } from './transmission';
 import { tools } from './tools';
 
 const SearchTorrentsArgsSchema = z.object({ query: z.string().min(1) }).strict();
@@ -117,6 +118,7 @@ const parseToolArguments = (argumentsValue: OllamaToolCall['function']['argument
 const executeToolCall = async (
   toolCall: OllamaToolCall,
   tolokaClient: TolokaClient,
+  transmissionClient: TransmissionClient,
 ): Promise<unknown> => {
   if (toolCall.function.name === 'get_date') {
     const parsed = GetDateArgsSchema.safeParse(parseToolArguments(toolCall.function.arguments));
@@ -149,6 +151,15 @@ const executeToolCall = async (
     }
 
     return await tolokaClient.getSearchResultsMeta(parsed.data.query);
+  }
+
+  if (toolCall.function.name === 'list_torrents') {
+    const parsed = EmptyArgsSchema.safeParse(parseToolArguments(toolCall.function.arguments));
+    if (!parsed.success) {
+      return { error: 'Invalid arguments for list_torrents. Expected {}' };
+    }
+
+    return await transmissionClient.listTorrents();
   }
 
   if (toolCall.function.name === 'list_torrent_bookmarks') {
@@ -217,6 +228,11 @@ const main = async (): Promise<void> => {
     username: config.TOLOKA_USERNAME,
     password: config.TOLOKA_PASSWORD,
   });
+  const transmissionClient = new TransmissionClient({
+    url: config.TRANS_URL,
+    username: config.TRANS_USERNAME,
+    password: config.TRANS_PASSWORD,
+  });
 
   const app = express();
   app.use(express.json());
@@ -237,7 +253,7 @@ const main = async (): Promise<void> => {
     }
 
     const toolCall = parseResult.data.tool_call;
-    const toolResult = await executeToolCall(toolCall, tolokaClient);
+    const toolResult = await executeToolCall(toolCall, tolokaClient, transmissionClient);
 
     const response = ToolCallResponseSchema.parse({
       tool_name: toolCall.function.name,

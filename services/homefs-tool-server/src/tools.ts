@@ -22,6 +22,19 @@ export const tools = [
   {
     type: 'function',
     function: {
+      name: 'list_torrents',
+      description:
+        'List torrents from Transmission with name, hash, status, and percent downloaded.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'search_torrents',
       description:
         'Search torrents on Toloka by query. Returned topicId is the default Toloka numeric ID (for example 679577).',
