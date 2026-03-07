@@ -43,13 +43,18 @@ const main = async (): Promise<void> => {
     const text = ctx.message.text.trim();
     const chatId = ctx.chat.id;
     let typingInterval: NodeJS.Timeout | null = null;
+    const quoteReplyOptions = {
+      reply_parameters: {
+        message_id: ctx.message.message_id,
+      },
+    } as const;
 
     try {
       if (allowedChatIds && !allowedChatIds.has(chatId)) {
         logger.warn('telegram: blocked message from unapproved chat', {
           chatId,
         });
-        await ctx.reply('This bot is not authorized for this chat.');
+        await ctx.reply('This bot is not authorized for this chat.', quoteReplyOptions);
         return;
       }
 
@@ -66,18 +71,19 @@ const main = async (): Promise<void> => {
 
       const reply = await modelClient.respond(chatId, text);
       logger.info('telegram: generated reply', { chatId, reply });
-      await ctx.reply(reply);
+      await ctx.reply(reply, quoteReplyOptions);
     } catch (error) {
       if (error instanceof ChatLockTimeoutError) {
         logger.warn('telegram: chat lock wait timeout', { chatId });
         await ctx.reply(
           'Your previous request is still being processed. Please wait a bit and try again.',
+          quoteReplyOptions,
         );
         return;
       }
 
       logger.error('telegram: failed to handle message', { chatId, error: serializeError(error) });
-      await ctx.reply('Something went wrong. Please try again later.');
+      await ctx.reply('Something went wrong. Please try again later.', quoteReplyOptions);
     } finally {
       if (typingInterval) {
         clearInterval(typingInterval);
