@@ -1,6 +1,11 @@
 import { z } from 'zod';
+import {
+  ListToolsResponseSchema,
+  OllamaToolCallSchema,
+  ToolCallResponseSchema,
+  type OllamaTool,
+} from 'homefs-shared';
 import { INSTRUCTION } from './instruction';
-import type { TolokaClient } from './toloka';
 
 type OllamaCredentials = {
   baseUrl: string;
@@ -10,31 +15,16 @@ type OllamaCredentials = {
 export type ConversationMessage = {
   role: string;
   content: string;
-  tool_calls?: z.output<typeof ToolCallSchema>[];
+  tool_calls?: z.output<typeof OllamaToolCallSchema>[];
 };
 
 const MAX_HISTORY_MESSAGES = 20;
-
-const ToolCallSchema = z.object({
-  id: z.string().optional(),
-  function: z.object({
-    name: z.enum([
-      'get_date',
-      'search_torrents',
-      'list_torrent_bookmarks',
-      'search_torrent_bookmarks_by_title',
-      'bookmark_torrent',
-      'remove_torrent_bookmark',
-    ]),
-    arguments: z.union([z.record(z.unknown()), z.string()]).optional(),
-  }),
-});
 
 const GenerateResponseSchema = z.object({
   message: z.object({
     role: z.string(),
     content: z.string(),
-    tool_calls: z.array(ToolCallSchema).optional(),
+    tool_calls: z.array(OllamaToolCallSchema).optional(),
   }),
 });
 
@@ -42,16 +32,17 @@ type GenerateResponse = z.output<typeof GenerateResponseSchema>;
 
 export class Model {
   private readonly credentials: OllamaCredentials;
-  private readonly tolokaClient: TolokaClient;
+  private readonly toolServerUrl: string;
   private readonly chatHistories = new Map<number, ConversationMessage[]>();
 
-  constructor(credentials: OllamaCredentials, tolokaClient: TolokaClient) {
+  constructor(credentials: OllamaCredentials, toolServerUrl: string) {
     this.credentials = credentials;
-    this.tolokaClient = tolokaClient;
+    this.toolServerUrl = toolServerUrl;
   }
 
   async respond(chatId: number, message: string): Promise<string> {
     const url = new URL('/api/chat', this.credentials.baseUrl);
+    const tools = await this.fetchTools();
     const history = this.getOrInitHistory(chatId);
     const messages: ConversationMessage[] = [...history, { role: 'user', content: message }];
 
@@ -64,99 +55,7 @@ export class Model {
         body: JSON.stringify({
           model: this.credentials.model,
           messages,
-          tools: [
-            {
-              type: 'function',
-              function: {
-                name: 'get_date',
-                description: 'Get the current date and time in ISO format.',
-              },
-            },
-            {
-              type: 'function',
-              function: {
-                name: 'search_torrents',
-                description:
-                  'Search torrents on Toloka by query. Returned topicId is the default Toloka numeric ID (for example 679577).',
-                parameters: {
-                  type: 'object',
-                  properties: {
-                    query: {
-                      type: 'string',
-                      description: 'Search query',
-                    },
-                  },
-                  required: ['query'],
-                },
-              },
-            },
-            {
-              type: 'function',
-              function: {
-                name: 'list_torrent_bookmarks',
-                description:
-                  'List bookmarked torrent topics from Toloka. topicId should be treated as the default Toloka numeric ID.',
-                parameters: {
-                  type: 'object',
-                  properties: {},
-                },
-              },
-            },
-            {
-              type: 'function',
-              function: {
-                name: 'search_torrent_bookmarks_by_title',
-                description:
-                  'Search bookmarked torrent topics by title and return matching topic IDs. topicId is the default Toloka numeric ID.',
-                parameters: {
-                  type: 'object',
-                  properties: {
-                    title: {
-                      type: 'string',
-                      description: 'Part of bookmark title to search for',
-                    },
-                  },
-                  required: ['title'],
-                },
-              },
-            },
-            {
-              type: 'function',
-              function: {
-                name: 'bookmark_torrent',
-                description:
-                  'Add a torrent topic to Toloka bookmarks by topicId. Use default Toloka numeric ID (for example 679577); t679577 is also accepted.',
-                parameters: {
-                  type: 'object',
-                  properties: {
-                    topicId: {
-                      type: 'string',
-                      description: 'Default Toloka numeric ID, for example 679577',
-                    },
-                  },
-                  required: ['topicId'],
-                },
-              },
-            },
-            {
-              type: 'function',
-              function: {
-                name: 'remove_torrent_bookmark',
-                description:
-                  'Remove a torrent topic from Toloka bookmarks by topicId. Use default Toloka numeric ID (for example 679577); t679577 is also accepted.',
-                parameters: {
-                  type: 'object',
-                  properties: {
-                    topicId: {
-                      type: 'string',
-                      description: 'Default Toloka numeric ID, for example 679577',
-                    },
-                  },
-                  required: ['topicId'],
-                },
-              },
-            },
-          ],
+          tools,
           stream: false,
         }),
       });
@@ -202,85 +101,59 @@ export class Model {
     return initialHistory;
   }
 
-  private async executeToolCall(toolCall: z.output<typeof ToolCallSchema>): Promise<unknown> {
+  private async fetchTools(): Promise<OllamaTool[]> {
+    const response = await fetch(new URL('/tools', this.toolServerUrl), {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Tool server /tools failed with status ${response.status}: ${body}`);
+    }
+
+    const json = await response.json();
+    const parsed = ListToolsResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new Error(`Tool server /tools returned invalid response: ${parsed.error.message}`);
+    }
+
+    return parsed.data.tools;
+  }
+
+  private async executeToolCall(toolCall: z.output<typeof OllamaToolCallSchema>): Promise<unknown> {
     console.log('ollama: executing tool call', { toolCall: JSON.stringify(toolCall) });
 
-    if (toolCall.function.name === 'get_date') {
-      return new Date().toISOString();
-    }
+    try {
+      const response = await fetch(new URL('/tools/call', this.toolServerUrl), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tool_call: toolCall }),
+      });
 
-    if (toolCall.function.name === 'search_torrents') {
-      const args = parseArguments(toolCall.function.arguments);
-      const parsed = z.object({ query: z.string().min(1) }).safeParse(args);
-
-      if (!parsed.success) {
-        return JSON.stringify({
-          error: 'Invalid arguments for search_torrents. Expected { query: string }',
-        });
-      }
-
-      return await this.tolokaClient.getSearchResultsMeta(parsed.data.query);
-    }
-
-    if (toolCall.function.name === 'list_torrent_bookmarks') {
-      return await this.tolokaClient.listBookmarkedTopics();
-    }
-
-    if (toolCall.function.name === 'search_torrent_bookmarks_by_title') {
-      const args = parseArguments(toolCall.function.arguments);
-      const parsed = z.object({ title: z.string().min(1) }).safeParse(args);
-
-      if (!parsed.success) {
+      if (!response.ok) {
+        const body = await response.text();
         return {
-          error:
-            'Invalid arguments for search_torrent_bookmarks_by_title. Expected { title: string }',
+          error: `Tool server call failed with status ${response.status}`,
+          body,
         };
       }
 
-      const titleQuery = parsed.data.title.trim().toLowerCase();
-      const bookmarks = await this.tolokaClient.listBookmarkedTopics();
-      const matches = bookmarks.filter((item) => item.title.toLowerCase().includes(titleQuery));
+      const json = await response.json();
+      const parsed = ToolCallResponseSchema.safeParse(json);
+      if (!parsed.success) {
+        return {
+          error: 'Tool server returned invalid response format',
+          details: parsed.error.flatten(),
+        };
+      }
 
+      return parsed.data.result;
+    } catch (error) {
       return {
-        query: parsed.data.title,
-        total: matches.length,
-        results: matches.slice(0, 25).map((item) => ({
-          topicId: item.topicId,
-          title: item.title,
-          category: typeof item.category === 'string' ? item.category : item.category.other,
-        })),
+        error: `Tool server request failed: ${String(error)}`,
       };
     }
-
-    if (toolCall.function.name === 'bookmark_torrent') {
-      const args = parseArguments(toolCall.function.arguments);
-      const parsed = z.object({ topicId: z.string().min(1) }).safeParse(args);
-
-      if (!parsed.success) {
-        return {
-          error: 'Invalid arguments for bookmark_torrent. Expected { topicId: string }',
-        };
-      }
-
-      await this.tolokaClient.addTopicToBookmarks(parsed.data.topicId);
-      return { ok: true, action: 'bookmarked', topicId: parsed.data.topicId };
-    }
-
-    if (toolCall.function.name === 'remove_torrent_bookmark') {
-      const args = parseArguments(toolCall.function.arguments);
-      const parsed = z.object({ topicId: z.string().min(1) }).safeParse(args);
-
-      if (!parsed.success) {
-        return {
-          error: 'Invalid arguments for remove_torrent_bookmark. Expected { topicId: string }',
-        };
-      }
-
-      await this.tolokaClient.removeTopicFromBookmarks(parsed.data.topicId);
-      return { ok: true, action: 'removed', topicId: parsed.data.topicId };
-    }
-
-    return { error: `Unsupported tool: ${toolCall.function.name}` };
   }
 }
 
@@ -294,18 +167,4 @@ function trimHistory(history: ConversationMessage[]): ConversationMessage[] {
   }
 
   return [first, ...rest.slice(rest.length - (MAX_HISTORY_MESSAGES - 1))];
-}
-
-function parseArguments(
-  argumentsValue: z.output<typeof ToolCallSchema>['function']['arguments'],
-): unknown {
-  if (typeof argumentsValue === 'string') {
-    try {
-      return JSON.parse(argumentsValue);
-    } catch {
-      return {};
-    }
-  }
-
-  return argumentsValue ?? {};
 }
