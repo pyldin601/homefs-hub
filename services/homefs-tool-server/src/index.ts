@@ -16,6 +16,7 @@ import { tools } from './tools';
 const SearchTorrentsArgsSchema = z.object({ query: z.string().min(1) }).strict();
 const SearchBookmarksByTitleArgsSchema = z.object({ title: z.string().min(1) }).strict();
 const TopicIdArgsSchema = z.object({ topicId: z.string().min(1) }).strict();
+const TorrentHashArgsSchema = z.object({ hash: z.string().min(1) }).strict();
 const GetDateArgsSchema = z.object({ timezone: z.string().min(1).optional() }).strict();
 const EmptyArgsSchema = z.object({}).strict();
 
@@ -160,6 +161,18 @@ const executeToolCall = async (
     }
 
     return await transmissionClient.listTorrents();
+  }
+
+  if (toolCall.function.name === 'remove_torrent_from_transmission') {
+    const parsed = TorrentHashArgsSchema.safeParse(parseToolArguments(toolCall.function.arguments));
+    if (!parsed.success) {
+      return {
+        error: 'Invalid arguments for remove_torrent_from_transmission. Expected { hash: string }',
+      };
+    }
+
+    await transmissionClient.removeTorrentByHash(parsed.data.hash);
+    return { ok: true, action: 'removed_from_transmission', hash: parsed.data.hash };
   }
 
   if (toolCall.function.name === 'list_torrent_bookmarks') {

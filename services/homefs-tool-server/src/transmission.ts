@@ -16,7 +16,7 @@ type TorrentRecord = {
   percentDone?: number;
 };
 
-type TorrentGetResponse = {
+type TransmissionRpcResponse = {
   result: string;
   arguments?: {
     torrents?: TorrentRecord[];
@@ -70,10 +70,17 @@ export class TransmissionClient {
       }));
   }
 
+  async removeTorrentByHash(hash: string): Promise<void> {
+    await this.callRpc('torrent-remove', {
+      ids: [hash],
+      'delete-local-data': false,
+    });
+  }
+
   private async callRpc(
     method: string,
     args: Record<string, unknown>,
-  ): Promise<TorrentGetResponse> {
+  ): Promise<TransmissionRpcResponse> {
     const payload = {
       method,
       arguments: args,
@@ -128,7 +135,7 @@ export class TransmissionClient {
     }
   }
 
-  private async parseResponse(response: Response): Promise<TorrentGetResponse> {
+  private async parseResponse(response: Response): Promise<TransmissionRpcResponse> {
     if (!response.ok) {
       const body = await response.text();
       throw new TransmissionClientError(
@@ -136,7 +143,7 @@ export class TransmissionClient {
       );
     }
 
-    const json = (await response.json()) as TorrentGetResponse;
+    const json = (await response.json()) as TransmissionRpcResponse;
     if (json.result !== 'success') {
       throw new TransmissionClientError(`Transmission RPC returned error: ${json.result}`);
     }

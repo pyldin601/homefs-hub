@@ -35,6 +35,24 @@ export const tools = [
   {
     type: 'function',
     function: {
+      name: 'remove_torrent_from_transmission',
+      description: 'Remove a torrent from Transmission by its hash.',
+      parameters: {
+        type: 'object',
+        properties: {
+          hash: {
+            type: 'string',
+            description: 'Torrent hash string (hashString from list_torrents)',
+          },
+        },
+        required: ['hash'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'search_torrents',
       description:
         'Search torrents on Toloka by query. Returned topicId is the default Toloka numeric ID (for example 679577).',
