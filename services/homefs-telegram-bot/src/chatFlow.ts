@@ -4,7 +4,6 @@ import { ChatLoop } from './chatLoop';
 import { logger, serializeError } from './logger';
 import { ChatLockTimeoutError, RedisService } from './redis';
 import { ToolService } from './toolService';
-import { DelayedTaskService } from './delayedTaskService';
 
 type ChatFlowOptions = {
   allowedChatIds?: Set<number> | null;
@@ -19,7 +18,6 @@ export class ChatFlow {
     private readonly bot: Telegraf,
     private readonly redisService: RedisService,
     private readonly toolService: ToolService,
-    private readonly delayedTaskService: DelayedTaskService,
     private readonly options?: ChatFlowOptions,
   ) {}
 

@@ -6,8 +6,9 @@ import { RedisService } from './redis';
 import { ChatLoop } from './chatLoop';
 import { INSTRUCTION } from './instruction';
 import { ToolService } from './toolService';
-import { DelayedTaskService } from './delayedTaskService';
+import { DelayedTaskQueue, DelayedTaskWorker } from './delayedTask';
 import { ChatFlow } from './chatFlow';
+import { OllamaMessage } from 'homefs-shared';
 
 const parseAllowedChatIds = (raw?: string): Set<number> | null => {
   if (!raw) {
@@ -34,14 +35,36 @@ const main = async (): Promise<void> => {
     redisUrl: config.REDIS_URL,
     keyPrefix: config.REDIS_KEY_PREFIX,
   });
-  const delayedTaskService = new DelayedTaskService(redisService.client, bot);
-  const toolService = new ToolService(config.TOOL_SERVER_URL, redisService, delayedTaskService);
+  const delayedTaskQueue = new DelayedTaskQueue(redisService.client);
+  const toolService = new ToolService(config.TOOL_SERVER_URL, redisService, delayedTaskQueue, bot);
   const chatLoop = new ChatLoop(
     { model: config.OLLAMA_MODEL, baseUrl: config.OLLAMA_BASE_URL },
     INSTRUCTION,
     { maxIterations: 10 },
   );
-  const chatFlow = new ChatFlow(chatLoop, bot, redisService, toolService, delayedTaskService, {
+  const delayedTaskWorker = new DelayedTaskWorker(redisService.client, async (job) => {
+    const messages: OllamaMessage[] = [
+      {
+        role: 'system',
+        content:
+          'You cannot reply to the user in this chat. To send response to the user use notify_user tool.',
+      },
+    ];
+    const tools = await toolService.fetchTools();
+
+    const responseMessages = await chatLoop.respond(
+      job.instruction,
+      messages,
+      tools,
+      async (call) => {
+        return await toolService.executeToolCall(job.chatId, job.messageId, call);
+      },
+    );
+
+    logger.debug('delayed-task: chat loop completed', { responseMessages });
+  });
+
+  const chatFlow = new ChatFlow(chatLoop, bot, redisService, toolService, {
     allowedChatIds,
     maxHistoryBeforeCompaction: 50,
   });
@@ -60,14 +83,16 @@ const main = async (): Promise<void> => {
   process.once('SIGINT', async () => {
     chatFlow.stop();
     bot.stop('SIGINT');
-    await delayedTaskService.close();
+    await delayedTaskQueue.close();
+    await delayedTaskWorker.close();
     await redisService.close();
   });
 
   process.once('SIGTERM', async () => {
     chatFlow.stop();
     bot.stop('SIGTERM');
-    await delayedTaskService.close();
+    await delayedTaskQueue.close();
+    await delayedTaskWorker.close();
     await redisService.close();
   });
 };

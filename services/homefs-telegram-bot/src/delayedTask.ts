@@ -11,14 +11,10 @@ export type DelayedTaskJobData = {
   instruction: string;
 };
 
-export class DelayedTaskService {
+export class DelayedTaskQueue {
   private readonly queue: Queue<DelayedTaskJobData>;
-  private readonly worker: Worker<DelayedTaskJobData>;
 
-  constructor(
-    redis: IORedis,
-    private readonly bot: Telegraf,
-  ) {
+  constructor(redis: IORedis) {
     const connection = {
       host: redis.options.host,
       port: redis.options.port,
@@ -30,24 +26,7 @@ export class DelayedTaskService {
     this.queue = new Queue(DEFAULT_QUEUE_NAME, {
       connection,
     });
-    this.worker = new Worker(DEFAULT_QUEUE_NAME, this.handleJob, {
-      connection,
-    });
   }
-
-  private handleJob = async (job: Job<DelayedTaskJobData>) => {
-    logger.info('delayed-task: executing job', {
-      jobId: job.id,
-      chatId: job.data.chatId,
-    });
-    ///
-    await this.bot.telegram.sendMessage(job.data.chatId, `debug: ${job.data.instruction}`);
-    ///
-    logger.info('delayed-task: executed job', {
-      jobId: job.id,
-      chatId: job.data.chatId,
-    });
-  };
 
   async addDelayedTask(payload: DelayedTaskJobData, delayInSeconds: number): Promise<void> {
     await this.queue.add(
@@ -64,7 +43,46 @@ export class DelayedTaskService {
   }
 
   async close(): Promise<void> {
-    await this.worker.close();
     await this.queue.close();
+  }
+}
+
+export class DelayedTaskWorker {
+  private readonly worker: Worker<DelayedTaskJobData>;
+
+  constructor(
+    redis: IORedis,
+    private readonly onJob: (job: DelayedTaskJobData) => Promise<void>,
+  ) {
+    const connection = {
+      host: redis.options.host,
+      port: redis.options.port,
+      username: redis.options.username,
+      password: redis.options.password,
+      db: redis.options.db,
+      tls: redis.options.tls,
+    };
+
+    this.worker = new Worker(DEFAULT_QUEUE_NAME, this.handleJob, {
+      connection,
+    });
+  }
+
+  private handleJob = async (job: Job<DelayedTaskJobData>) => {
+    logger.info('delayed-task: executing job', {
+      jobId: job.id,
+      chatId: job.data.chatId,
+    });
+    ///
+    await this.onJob(job.data);
+    ///
+    logger.info('delayed-task: executed job', {
+      jobId: job.id,
+      chatId: job.data.chatId,
+    });
+  };
+
+  async close(): Promise<void> {
+    await this.worker.close();
   }
 }

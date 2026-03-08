@@ -7,13 +7,19 @@ import {
 } from 'homefs-shared';
 import { logger } from './logger';
 import { RedisService } from './redis';
-import { DelayedTaskService } from './delayedTaskService';
+import { DelayedTaskQueue } from './delayedTask';
+import { Telegraf } from 'telegraf';
 
 const ClearChatHistoryArgsSchema = z.object({}).strict();
 const AddDelayedTaskArgsSchema = z
   .object({
     instruction: z.string().trim().min(1),
     delayInSeconds: z.number().int().positive(),
+  })
+  .strict();
+const NotifyUserArgsSchema = z
+  .object({
+    text: z.string(),
   })
   .strict();
 
@@ -52,13 +58,32 @@ const LOCAL_TOOLS: ReadonlyArray<OllamaTool> = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'notify_user',
+      description: 'Send notification to the user about completed delayed task or reminder.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: {
+            type: 'string',
+            description: 'Text to send to the user.',
+          },
+        },
+        required: ['text'],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 export class ToolService {
   constructor(
     private readonly toolServerUrl: string,
     private readonly redisService: RedisService,
-    private readonly delayedTaskService: DelayedTaskService,
+    private readonly delayedTaskQueue: DelayedTaskQueue,
+    private readonly bot: Telegraf,
   ) {}
 
   public async fetchTools(): Promise<OllamaTool[]> {
@@ -116,13 +141,31 @@ export class ToolService {
 
       const payload = { chatId, messageId, instruction: parsed.data.instruction };
 
-      await this.delayedTaskService.addDelayedTask(payload, parsed.data.delayInSeconds);
+      await this.delayedTaskQueue.addDelayedTask(payload, parsed.data.delayInSeconds);
 
       return {
         ok: true,
         action: 'delayed_task_scheduled',
         payload,
       };
+    }
+
+    if (toolCall.function.name === 'notify_user') {
+      const parsed = NotifyUserArgsSchema.safeParse(
+        parseToolArguments(toolCall.function.arguments),
+      );
+      if (!parsed.success) {
+        return {
+          error: 'Invalid arguments for notify_user. Expected { text: string }',
+          details: parsed.error.flatten(),
+        };
+      }
+      await this.bot.telegram.sendMessage(chatId, parsed.data.text, {
+        reply_parameters: {
+          message_id: messageId,
+        },
+      });
+      return { ok: true, action: 'notified_user' };
     }
 
     try {
