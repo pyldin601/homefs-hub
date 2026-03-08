@@ -34,8 +34,7 @@ const main = async (): Promise<void> => {
     redisUrl: config.REDIS_URL,
     keyPrefix: config.REDIS_KEY_PREFIX,
   });
-  const { host, port } = redisService.client.options;
-  const delayedTaskService = new DelayedTaskService({ host, port }, bot);
+  const delayedTaskService = new DelayedTaskService(redisService.client, bot);
   const toolService = new ToolService(config.TOOL_SERVER_URL, redisService, delayedTaskService);
   const chatLoop = new ChatLoop(
     { model: config.OLLAMA_MODEL, baseUrl: config.OLLAMA_BASE_URL },
@@ -59,12 +58,14 @@ const main = async (): Promise<void> => {
   await bot.launch();
 
   process.once('SIGINT', async () => {
+    chatFlow.stop();
     bot.stop('SIGINT');
     await delayedTaskService.close();
     await redisService.close();
   });
 
   process.once('SIGTERM', async () => {
+    chatFlow.stop();
     bot.stop('SIGTERM');
     await delayedTaskService.close();
     await redisService.close();

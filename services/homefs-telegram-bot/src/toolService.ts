@@ -89,7 +89,9 @@ export class ToolService {
     logger.info('ollama: executing tool call', { toolCall: JSON.stringify(toolCall) });
 
     if (toolCall.function.name === 'clear_chat_history') {
-      const parsed = ClearChatHistoryArgsSchema.safeParse(toolCall.function.arguments);
+      const parsed = ClearChatHistoryArgsSchema.safeParse(
+        parseToolArguments(toolCall.function.arguments),
+      );
       if (!parsed.success) {
         return {
           error: 'Invalid arguments for clear_chat_history. Expected {}',
@@ -101,7 +103,9 @@ export class ToolService {
     }
 
     if (toolCall.function.name === 'add_delayed_task') {
-      const parsed = AddDelayedTaskArgsSchema.safeParse(toolCall.function.arguments);
+      const parsed = AddDelayedTaskArgsSchema.safeParse(
+        parseToolArguments(toolCall.function.arguments),
+      );
       if (!parsed.success) {
         return {
           error:
@@ -153,3 +157,18 @@ export class ToolService {
     }
   }
 }
+
+const parseToolArguments = (
+  argumentsValue: z.output<typeof OllamaToolCallSchema>['function']['arguments'],
+): unknown => {
+  if (typeof argumentsValue === 'string') {
+    try {
+      return JSON.parse(argumentsValue);
+    } catch {
+      logger.warn('ollama: failed to parse tool arguments as JSON', { argumentsValue });
+      return {};
+    }
+  }
+
+  return argumentsValue ?? {};
+};

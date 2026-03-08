@@ -16,12 +16,17 @@ export class DelayedTaskService {
   private readonly worker: Worker<DelayedTaskJobData>;
 
   constructor(
-    connection: {
-      readonly host?: string;
-      readonly port?: number;
-    },
+    redis: IORedis,
     private readonly bot: Telegraf,
   ) {
+    const connection = {
+      host: redis.options.host,
+      port: redis.options.port,
+      username: redis.options.username,
+      password: redis.options.password,
+      db: redis.options.db,
+      tls: redis.options.tls,
+    };
     this.queue = new Queue(DEFAULT_QUEUE_NAME, {
       connection,
     });

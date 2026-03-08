@@ -2,7 +2,7 @@ import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { ChatLoop } from './chatLoop';
 import { logger, serializeError } from './logger';
-import { RedisService } from './redis';
+import { ChatLockTimeoutError, RedisService } from './redis';
 import { ToolService } from './toolService';
 
 type ChatFlowOptions = {
@@ -11,6 +11,9 @@ type ChatFlowOptions = {
 };
 
 export class ChatFlow {
+  private isStarted = false;
+  private isHandlerRegistered = false;
+
   constructor(
     private readonly chatLoop: ChatLoop,
     private readonly bot: Telegraf,
@@ -19,8 +22,22 @@ export class ChatFlow {
     private readonly options?: ChatFlowOptions,
   ) {}
 
-  start() {
+  start(): void {
+    if (this.isStarted) {
+      logger.warn('chat-flow: start called while already started');
+      return;
+    }
+
+    this.isStarted = true;
+    if (this.isHandlerRegistered) {
+      return;
+    }
+
     this.bot.on(message('text'), async (ctx) => {
+      if (!this.isStarted) {
+        return;
+      }
+
       const chatId = ctx.chat.id;
       const text = ctx.message.text.trim();
       const messageId = ctx.message.message_id;
@@ -52,11 +69,29 @@ export class ChatFlow {
         const reply = await this.generateReply(chatId, messageId, text);
         await ctx.reply(reply, quoteReplyOptions);
       } catch (error) {
-        console.error('Error in chat flow:', error);
+        if (error instanceof ChatLockTimeoutError) {
+          logger.warn('telegram: chat lock wait timeout', { chatId });
+          await ctx.reply(
+            'Your previous request is still being processed. Please wait a bit and try again.',
+            quoteReplyOptions,
+          );
+          return;
+        }
+
+        logger.error('telegram: failed to handle message', {
+          chatId,
+          error: serializeError(error),
+        });
+        await ctx.reply('Something went wrong. Please try again later.', quoteReplyOptions);
       } finally {
         clearInterval(typingInterval);
       }
     });
+    this.isHandlerRegistered = true;
+  }
+
+  stop(): void {
+    this.isStarted = false;
   }
 
   private async generateReply(chatId: number, messageId: number, text: string): Promise<string> {
