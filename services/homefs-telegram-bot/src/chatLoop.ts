@@ -12,7 +12,7 @@ type OllamaCredentials = {
   model: string;
 };
 
-type AgentOptions = {
+type ChatLoopOptions = {
   maxIterations?: number;
 };
 
@@ -21,17 +21,17 @@ const GenerateResponseSchema = z.object({
 });
 
 /** Stateless Ollama chat-loop runner. */
-export class Agent {
+export class ChatLoop {
   private readonly maxIterations: number;
 
   constructor(
     private readonly credentials: OllamaCredentials,
     private readonly initialInstruction: string,
-    options?: AgentOptions,
+    options?: ChatLoopOptions,
   ) {
     const maxIterations = options?.maxIterations ?? 10;
     if (!Number.isInteger(maxIterations) || maxIterations <= 0) {
-      throw new Error('Agent maxIterations must be a positive integer');
+      throw new Error('ChatLoop maxIterations must be a positive integer');
     }
     this.maxIterations = maxIterations;
   }
@@ -47,7 +47,7 @@ export class Agent {
     const messages: OllamaMessage[] = [];
 
     messages.push({ role: 'user', content: message });
-    logger.debug('agent: response loop started', {
+    logger.debug('chat-loop: response loop started', {
       historyCount: history.length,
       toolsCount: tools.length,
       maxIterations: this.maxIterations,
@@ -57,13 +57,13 @@ export class Agent {
     let iteration = 0;
     while (isWaitingForToolResult) {
       iteration += 1;
-      logger.debug('agent: loop iteration started', { iteration });
+      logger.debug('chat-loop: loop iteration started', { iteration });
       if (iteration > this.maxIterations) {
-        logger.error('agent: max iterations exceeded', {
+        logger.error('chat-loop: max iterations exceeded', {
           iteration,
           maxIterations: this.maxIterations,
         });
-        throw new Error(`Agent exceeded max iterations (${this.maxIterations})`);
+        throw new Error(`ChatLoop exceeded max iterations (${this.maxIterations})`);
       }
 
       const response = await fetch(url, {
@@ -86,7 +86,7 @@ export class Agent {
 
       if (!response.ok) {
         const body = await response.text();
-        logger.error('agent: ollama request failed', {
+        logger.error('chat-loop: ollama request failed', {
           status: response.status,
           body,
         });
@@ -97,13 +97,13 @@ export class Agent {
       const parsed = GenerateResponseSchema.parse(json);
       const assistantMessage = parsed.message;
       messages.push(assistantMessage);
-      logger.debug('agent: assistant message received', {
+      logger.debug('chat-loop: assistant message received', {
         hasToolCalls: Boolean(assistantMessage.tool_calls?.length),
       });
 
       if (!assistantMessage.tool_calls || assistantMessage.tool_calls.length === 0) {
         isWaitingForToolResult = false;
-        logger.info('agent: response loop completed', {
+        logger.info('chat-loop: response loop completed', {
           iteration,
           messageCount: messages.length,
         });
@@ -111,7 +111,7 @@ export class Agent {
       }
 
       for (const toolCall of assistantMessage.tool_calls) {
-        logger.info('agent: executing tool call', {
+        logger.info('chat-loop: executing tool call', {
           toolName: toolCall.function.name,
           iteration,
         });
@@ -122,11 +122,11 @@ export class Agent {
             content: JSON.stringify(toolResult),
           };
           messages.push(toolMessage);
-          logger.debug('agent: tool call completed', {
+          logger.debug('chat-loop: tool call completed', {
             toolName: toolCall.function.name,
           });
         } catch (error) {
-          logger.error('agent: tool call failed', {
+          logger.error('chat-loop: tool call failed', {
             toolName: toolCall.function.name,
             error: serializeError(error),
           });
@@ -135,6 +135,6 @@ export class Agent {
       }
     }
 
-    throw new Error('unreachable: agent loop ended without a response');
+    throw new Error('unreachable: chat loop ended without a response');
   }
 }
