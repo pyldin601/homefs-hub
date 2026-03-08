@@ -1,6 +1,5 @@
 import { Queue, Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
-import { Telegraf } from 'telegraf';
 import { logger } from './logger';
 
 const DEFAULT_QUEUE_NAME = 'delayed-tasks';

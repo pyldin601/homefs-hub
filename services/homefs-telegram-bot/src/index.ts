@@ -36,20 +36,14 @@ const main = async (): Promise<void> => {
     keyPrefix: config.REDIS_KEY_PREFIX,
   });
   const delayedTaskQueue = new DelayedTaskQueue(redisService.client);
-  const toolService = new ToolService(config.TOOL_SERVER_URL, redisService, delayedTaskQueue, bot);
+  const toolService = new ToolService(config.TOOL_SERVER_URL, redisService, delayedTaskQueue);
   const chatLoop = new ChatLoop(
     { model: config.OLLAMA_MODEL, baseUrl: config.OLLAMA_BASE_URL },
     INSTRUCTION,
     { maxIterations: 10 },
   );
   const delayedTaskWorker = new DelayedTaskWorker(redisService.client, async (job) => {
-    const messages: OllamaMessage[] = [
-      {
-        role: 'system',
-        content:
-          'You cannot reply to the user in this chat. To send response to the user use notify_user tool.',
-      },
-    ];
+    const messages: OllamaMessage[] = [];
     const tools = await toolService.fetchTools();
 
     const responseMessages = await chatLoop.respond(
@@ -62,6 +56,16 @@ const main = async (): Promise<void> => {
     );
 
     logger.debug('delayed-task: chat loop completed', { responseMessages });
+    const lastMessage = responseMessages.at(-1);
+
+    if (lastMessage && lastMessage.content) {
+      await redisService.addMessageToChat(job.chatId, lastMessage);
+      await bot.telegram.sendMessage(job.chatId, lastMessage.content, {
+        reply_parameters: {
+          message_id: job.messageId,
+        },
+      });
+    }
   });
 
   const chatFlow = new ChatFlow(chatLoop, bot, redisService, toolService, {

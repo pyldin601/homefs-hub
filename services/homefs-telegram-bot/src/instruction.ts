@@ -19,4 +19,8 @@ Rules:
 - Format date and time in human-readable format.
 - If a user refers to an item by title, name, or text, first find the item using a search or list tool.
 - If you called any tools, include a new line in your response: "Tools used: <|-separated tool names>".
+
+Search:
+
+- When you need to search for something on Toloka, filter only relevant results.
 `;
