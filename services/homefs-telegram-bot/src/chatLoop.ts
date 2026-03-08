@@ -140,4 +140,37 @@ export class ChatLoop {
 
     throw new Error('unreachable: chat loop ended without a response');
   }
+
+  public async summarizeHistory(history: ReadonlyArray<OllamaMessage>): Promise<OllamaMessage> {
+    const url = new URL('/api/chat', this.credentials.baseUrl);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: this.credentials.model,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Summarize chat history for long-term memory compression. Keep only essential user preferences, decisions, unresolved tasks, and critical tool outcomes. Respond in plain text.',
+          },
+          {
+            role: 'user',
+            content: JSON.stringify(history),
+          },
+        ],
+        stream: false,
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`History summarization failed with status ${response.status}: ${body}`);
+    }
+
+    const json = await response.json();
+    const parsed = GenerateResponseSchema.parse(json);
+
+    return parsed.message;
+  }
 }

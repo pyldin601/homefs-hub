@@ -44,8 +44,15 @@ export const ToolCallResponseSchema = z.object({
   result: z.unknown(),
 });
 
+export const OllamaMessageSchema = z.object({
+  role: z.string(),
+  content: z.string(),
+  tool_calls: z.array(OllamaToolCallSchema).optional(),
+});
+
 export type OllamaTool = z.infer<typeof OllamaToolSchema>;
 export type OllamaToolCall = z.infer<typeof OllamaToolCallSchema>;
 export type ListToolsResponse = z.infer<typeof ListToolsResponseSchema>;
 export type ToolCallRequest = z.infer<typeof ToolCallRequestSchema>;
 export type ToolCallResponse = z.infer<typeof ToolCallResponseSchema>;
+export type OllamaMessage = z.infer<typeof OllamaMessageSchema>;

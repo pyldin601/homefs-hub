@@ -11,7 +11,7 @@ export class ChatLockTimeoutError extends Error {
 }
 
 export class RedisService {
-  private readonly client: Redis;
+  public readonly client: Redis;
   private readonly redlockClient: Redis;
   private readonly keyPrefix: string;
   private readonly redlock: Redlock;

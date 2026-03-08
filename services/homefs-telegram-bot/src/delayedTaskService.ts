@@ -7,6 +7,7 @@ const DEFAULT_QUEUE_NAME = 'delayed-tasks';
 
 export type DelayedTaskJobData = {
   chatId: number;
+  messageId: number;
   instruction: string;
 };
 
@@ -15,20 +16,17 @@ export class DelayedTaskService {
   private readonly worker: Worker<DelayedTaskJobData>;
 
   constructor(
-    redis: IORedis,
+    connection: {
+      readonly host?: string;
+      readonly port?: number;
+    },
     private readonly bot: Telegraf,
   ) {
     this.queue = new Queue(DEFAULT_QUEUE_NAME, {
-      connection: {
-        host: redis.options.host,
-        port: redis.options.port,
-      },
+      connection,
     });
     this.worker = new Worker(DEFAULT_QUEUE_NAME, this.handleJob, {
-      connection: {
-        host: redis.options.host,
-        port: redis.options.port,
-      },
+      connection,
     });
   }
 
@@ -51,6 +49,7 @@ export class DelayedTaskService {
       'delayed-task',
       {
         chatId: payload.chatId,
+        messageId: payload.messageId,
         instruction: payload.instruction,
       },
       {
