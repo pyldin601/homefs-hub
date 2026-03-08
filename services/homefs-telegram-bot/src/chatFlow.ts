@@ -4,6 +4,7 @@ import { ChatLoop } from './chatLoop';
 import { logger, serializeError } from './logger';
 import { ChatLockTimeoutError, RedisService } from './redis';
 import { ToolService } from './toolService';
+import { DelayedTaskService } from './delayedTaskService';
 
 type ChatFlowOptions = {
   allowedChatIds?: Set<number> | null;
@@ -12,13 +13,13 @@ type ChatFlowOptions = {
 
 export class ChatFlow {
   private isStarted = false;
-  private isHandlerRegistered = false;
 
   constructor(
     private readonly chatLoop: ChatLoop,
     private readonly bot: Telegraf,
     private readonly redisService: RedisService,
     private readonly toolService: ToolService,
+    private readonly delayedTaskService: DelayedTaskService,
     private readonly options?: ChatFlowOptions,
   ) {}
 
@@ -29,9 +30,6 @@ export class ChatFlow {
     }
 
     this.isStarted = true;
-    if (this.isHandlerRegistered) {
-      return;
-    }
 
     this.bot.on(message('text'), async (ctx) => {
       if (!this.isStarted) {
@@ -87,7 +85,6 @@ export class ChatFlow {
         clearInterval(typingInterval);
       }
     });
-    this.isHandlerRegistered = true;
   }
 
   stop(): void {

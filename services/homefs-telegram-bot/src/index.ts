@@ -41,7 +41,7 @@ const main = async (): Promise<void> => {
     INSTRUCTION,
     { maxIterations: 10 },
   );
-  const chatFlow = new ChatFlow(chatLoop, bot, redisService, toolService, {
+  const chatFlow = new ChatFlow(chatLoop, bot, redisService, toolService, delayedTaskService, {
     allowedChatIds,
     maxHistoryBeforeCompaction: 50,
   });
