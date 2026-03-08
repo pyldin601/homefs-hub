@@ -3,6 +3,15 @@ import Redlock from 'redlock';
 import { ConversationMessageSchema, type ConversationMessage } from './conversation';
 import { logger, serializeError } from './logger';
 
+export type DelayedTask = {
+  id: string;
+  instruction: string;
+  dueDateIso: string;
+  sourceChatId: number;
+  status: 'pending' | 'completed';
+  createdAtIso: string;
+};
+
 export class ChatLockTimeoutError extends Error {
   constructor() {
     super('Timed out while waiting for chat lock');
@@ -87,6 +96,10 @@ export class RedisService {
     await this.client.del(key);
   }
 
+  async saveDelayedTask(task: DelayedTask): Promise<void> {
+    await this.client.hset(this.delayedTasksKey(), task.id, JSON.stringify(task));
+  }
+
   async withChatLock<T>(chatId: number, callback: () => Promise<T>): Promise<T> {
     logger.debug('redis: waiting for chat lock', { chatId });
     try {
@@ -119,5 +132,9 @@ export class RedisService {
 
   private chatLockKey(chatId: number): string {
     return `${this.keyPrefix}:lock:${chatId}`;
+  }
+
+  private delayedTasksKey(): string {
+    return `${this.keyPrefix}:delayed_tasks`;
   }
 }

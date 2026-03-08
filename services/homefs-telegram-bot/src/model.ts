@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import {
   ListToolsResponseSchema,
   OllamaToolCallSchema,
@@ -16,6 +17,12 @@ type OllamaCredentials = {
 };
 
 const ClearChatHistoryArgsSchema = z.object({}).strict();
+const SetDelayedTaskArgsSchema = z
+  .object({
+    instruction: z.string().trim().min(1),
+    minutes: z.number().int().positive(),
+  })
+  .strict();
 const MAX_HISTORY_BEFORE_COMPACTION = 20;
 
 const LOCAL_TOOLS: ReadonlyArray<OllamaTool> = [
@@ -27,6 +34,29 @@ const LOCAL_TOOLS: ReadonlyArray<OllamaTool> = [
       parameters: {
         type: 'object',
         properties: {},
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_delayed_task',
+      description:
+        'Create a delayed reminder/check task. Provide instruction and minutes to delay.',
+      parameters: {
+        type: 'object',
+        properties: {
+          instruction: {
+            type: 'string',
+            description: 'Full task instruction: what to do, what to check, and desired output.',
+          },
+          minutes: {
+            type: 'integer',
+            description: 'Delay in minutes from now before the task is due.',
+          },
+        },
+        required: ['instruction', 'minutes'],
         additionalProperties: false,
       },
     },
@@ -232,6 +262,41 @@ export class Model {
 
       await this.redisService.clearChatMessages(chatId);
       return { ok: true, action: 'cleared_chat_history' };
+    }
+
+    if (toolCall.function.name === 'set_delayed_task') {
+      const args = parseToolArguments(toolCall.function.arguments);
+      const parsed = SetDelayedTaskArgsSchema.safeParse(args);
+      if (!parsed.success) {
+        return {
+          error:
+            'Invalid arguments for set_delayed_task. Expected { instruction: string, minutes: positive integer }',
+          details: parsed.error.flatten(),
+        };
+      }
+
+      const taskId = randomUUID();
+      const createdAtIso = new Date().toISOString();
+      const dueDateIso = new Date(Date.now() + parsed.data.minutes * 60_000).toISOString();
+      const fullInstruction = parsed.data.instruction;
+
+      await this.redisService.saveDelayedTask({
+        id: taskId,
+        instruction: fullInstruction,
+        dueDateIso,
+        sourceChatId: chatId,
+        status: 'pending',
+        createdAtIso,
+      });
+
+      return {
+        ok: true,
+        action: 'delayed_task_scheduled',
+        task_id: taskId,
+        minutes: parsed.data.minutes,
+        due_date: dueDateIso,
+        instruction: fullInstruction,
+      };
     }
 
     try {
