@@ -110,29 +110,32 @@ export class ChatLoop {
         return messages;
       }
 
-      for (const toolCall of assistantMessage.tool_calls) {
-        logger.info('chat-loop: executing tool call', {
-          toolName: toolCall.function.name,
-          iteration,
-        });
-        try {
-          const toolResult = await onToolCall(toolCall);
-          const toolMessage: OllamaMessage = {
-            role: 'tool',
-            content: JSON.stringify(toolResult),
-          };
-          messages.push(toolMessage);
-          logger.debug('chat-loop: tool call completed', {
+      const toolMessages = await Promise.all(
+        assistantMessage.tool_calls.map(async (toolCall) => {
+          logger.info('chat-loop: executing tool call', {
             toolName: toolCall.function.name,
+            iteration,
           });
-        } catch (error) {
-          logger.error('chat-loop: tool call failed', {
-            toolName: toolCall.function.name,
-            error: serializeError(error),
-          });
-          throw error;
-        }
-      }
+          try {
+            const toolResult = await onToolCall(toolCall);
+            logger.debug('chat-loop: tool call completed', {
+              toolName: toolCall.function.name,
+            });
+            const toolMessage: OllamaMessage = {
+              role: 'tool',
+              content: JSON.stringify(toolResult),
+            };
+            return toolMessage;
+          } catch (error) {
+            logger.error('chat-loop: tool call failed', {
+              toolName: toolCall.function.name,
+              error: serializeError(error),
+            });
+            throw error;
+          }
+        }),
+      );
+      messages.push(...toolMessages);
     }
 
     throw new Error('unreachable: chat loop ended without a response');
