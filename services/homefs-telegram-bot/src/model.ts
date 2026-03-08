@@ -9,6 +9,8 @@ import type { ConversationMessage } from './conversation';
 import { INSTRUCTION } from './instruction';
 import { logger } from './logger';
 import { RedisService } from './redis';
+import { DelayedTaskService } from './delayedTaskService';
+import { Telegraf } from 'telegraf';
 
 type OllamaCredentials = {
   baseUrl: string;
@@ -16,6 +18,12 @@ type OllamaCredentials = {
 };
 
 const ClearChatHistoryArgsSchema = z.object({}).strict();
+const AddDelayedTaskArgsSchema = z
+  .object({
+    instruction: z.string().trim().min(1),
+    delayInSeconds: z.number().int().positive(),
+  })
+  .strict();
 const MAX_HISTORY_BEFORE_COMPACTION = 20;
 
 const LOCAL_TOOLS: ReadonlyArray<OllamaTool> = [
@@ -27,6 +35,28 @@ const LOCAL_TOOLS: ReadonlyArray<OllamaTool> = [
       parameters: {
         type: 'object',
         properties: {},
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'add_delayed_task',
+      description: 'Adds delayed task or reminder.',
+      parameters: {
+        type: 'object',
+        properties: {
+          instruction: {
+            type: 'string',
+            description: 'Self-contained instruction for delayed execution.',
+          },
+          delayInSeconds: {
+            type: 'integer',
+            description: 'Delay before execution in seconds.',
+          },
+        },
+        required: ['instruction', 'delayInSeconds'],
         additionalProperties: false,
       },
     },
@@ -52,12 +82,14 @@ export class Model {
   private readonly credentials: OllamaCredentials;
   private readonly toolServerUrl: string;
   private readonly redisService: RedisService;
+  private readonly delayedTaskService: DelayedTaskService;
 
   constructor(
     credentials: OllamaCredentials,
     toolServerUrl: string,
     redisUrl: string,
     redisKeyPrefix: string,
+    bot: Telegraf,
   ) {
     this.credentials = credentials;
     this.toolServerUrl = toolServerUrl;
@@ -65,6 +97,7 @@ export class Model {
       redisUrl,
       keyPrefix: redisKeyPrefix,
     });
+    this.delayedTaskService = new DelayedTaskService(this.redisService.client, bot);
   }
 
   async connect(): Promise<void> {
@@ -232,6 +265,28 @@ export class Model {
 
       await this.redisService.clearChatMessages(chatId);
       return { ok: true, action: 'cleared_chat_history' };
+    }
+
+    if (toolCall.function.name === 'add_delayed_task') {
+      const args = parseToolArguments(toolCall.function.arguments);
+      const parsed = AddDelayedTaskArgsSchema.safeParse(args);
+      if (!parsed.success) {
+        return {
+          error:
+            'Invalid arguments for add_delayed_task. Expected { instruction: string, delayInSeconds: positive integer }',
+          details: parsed.error.flatten(),
+        };
+      }
+
+      const payload = { chatId, instruction: parsed.data.instruction };
+
+      await this.delayedTaskService.addDelayedTask(payload, parsed.data.delayInSeconds);
+
+      return {
+        ok: true,
+        action: 'delayed_task_scheduled',
+        payload,
+      };
     }
 
     try {

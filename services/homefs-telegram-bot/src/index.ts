@@ -4,7 +4,8 @@ import { Model } from './model';
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { logger, serializeError } from './logger';
-import { ChatLockTimeoutError } from './redis';
+import { ChatLockTimeoutError, RedisService } from './redis';
+import { DelayedTaskService } from './delayedTaskService';
 
 const parseAllowedChatIds = (raw?: string): Set<number> | null => {
   if (!raw) {
@@ -23,6 +24,10 @@ const main = async (): Promise<void> => {
   const config: Config = parseConfig(process.env);
   const allowedChatIds = parseAllowedChatIds(config.ALLOWED_CHAT_IDS);
 
+  const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN, {
+    handlerTimeout: 30 * 60 * 1000,
+  });
+
   const modelClient = new Model(
     {
       baseUrl: config.OLLAMA_BASE_URL,
@@ -31,13 +36,10 @@ const main = async (): Promise<void> => {
     config.TOOL_SERVER_URL,
     config.REDIS_URL,
     config.REDIS_KEY_PREFIX,
+    bot,
   );
 
   await modelClient.connect();
-
-  const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN, {
-    handlerTimeout: 30 * 60 * 1000,
-  });
 
   bot.on(message('text'), async (ctx) => {
     const text = ctx.message.text.trim();
