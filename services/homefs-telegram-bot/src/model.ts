@@ -17,10 +17,16 @@ type OllamaCredentials = {
 };
 
 const ClearChatHistoryArgsSchema = z.object({}).strict();
+const ListDelayedTasksArgsSchema = z.object({}).strict();
 const SetDelayedTaskArgsSchema = z
   .object({
     instruction: z.string().trim().min(1),
     minutes: z.number().int().positive(),
+  })
+  .strict();
+const DeleteDelayedTaskArgsSchema = z
+  .object({
+    task_id: z.string().trim().min(1),
   })
   .strict();
 const MAX_HISTORY_BEFORE_COMPACTION = 20;
@@ -57,6 +63,36 @@ const LOCAL_TOOLS: ReadonlyArray<OllamaTool> = [
           },
         },
         required: ['instruction', 'minutes'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_delayed_tasks',
+      description: 'List delayed tasks for the current chat.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_delayed_task',
+      description: 'Delete one delayed task by task_id from the current chat.',
+      parameters: {
+        type: 'object',
+        properties: {
+          task_id: {
+            type: 'string',
+            description: 'Task ID returned by set_delayed_task or list_delayed_tasks.',
+          },
+        },
+        required: ['task_id'],
         additionalProperties: false,
       },
     },
@@ -296,6 +332,41 @@ export class Model {
         minutes: parsed.data.minutes,
         due_date: dueDateIso,
         instruction: fullInstruction,
+      };
+    }
+
+    if (toolCall.function.name === 'list_delayed_tasks') {
+      const args = parseToolArguments(toolCall.function.arguments);
+      const parsed = ListDelayedTasksArgsSchema.safeParse(args);
+      if (!parsed.success) {
+        return {
+          error: 'Invalid arguments for list_delayed_tasks. Expected {}',
+          details: parsed.error.flatten(),
+        };
+      }
+
+      const tasks = await this.redisService.listDelayedTasks(chatId);
+      return {
+        ok: true,
+        tasks,
+      };
+    }
+
+    if (toolCall.function.name === 'delete_delayed_task') {
+      const args = parseToolArguments(toolCall.function.arguments);
+      const parsed = DeleteDelayedTaskArgsSchema.safeParse(args);
+      if (!parsed.success) {
+        return {
+          error: 'Invalid arguments for delete_delayed_task. Expected { task_id: string }',
+          details: parsed.error.flatten(),
+        };
+      }
+
+      const deleted = await this.redisService.deleteDelayedTask(chatId, parsed.data.task_id);
+      return {
+        ok: true,
+        deleted,
+        task_id: parsed.data.task_id,
       };
     }
 

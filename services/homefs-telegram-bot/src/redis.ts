@@ -97,7 +97,87 @@ export class RedisService {
   }
 
   async saveDelayedTask(task: DelayedTask): Promise<void> {
-    await this.client.hset(this.delayedTasksKey(), task.id, JSON.stringify(task));
+    await this.client.hset(this.delayedTaskKey(task.sourceChatId, task.id), {
+      id: task.id,
+      instruction: task.instruction,
+      dueDateIso: task.dueDateIso,
+      sourceChatId: String(task.sourceChatId),
+      status: task.status,
+      createdAtIso: task.createdAtIso,
+    });
+  }
+
+  async listDelayedTasks(chatId: number): Promise<DelayedTask[]> {
+    const pattern = this.delayedTaskPattern(chatId);
+    const tasks: DelayedTask[] = [];
+    let cursor = '0';
+
+    do {
+      const [nextCursor, keys] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', 200);
+      cursor = nextCursor;
+
+      if (keys.length === 0) {
+        continue;
+      }
+
+      const pipeline = this.client.pipeline();
+      for (const key of keys) {
+        pipeline.hgetall(key);
+      }
+      const results = await pipeline.exec();
+
+      for (const result of results ?? []) {
+        const [pipelineError, rawFields] = result as [Error | null, unknown];
+        if (pipelineError || !rawFields || typeof rawFields !== 'object') {
+          continue;
+        }
+        const fields = rawFields as Record<string, string>;
+
+        const id = fields.id;
+        const instruction = fields.instruction;
+        const dueDateIso = fields.dueDateIso;
+        const sourceChatIdRaw = fields.sourceChatId;
+        const status = fields.status;
+        const createdAtIso = fields.createdAtIso;
+
+        if (
+          typeof id !== 'string' ||
+          typeof instruction !== 'string' ||
+          typeof dueDateIso !== 'string' ||
+          typeof sourceChatIdRaw !== 'string' ||
+          typeof status !== 'string' ||
+          typeof createdAtIso !== 'string'
+        ) {
+          continue;
+        }
+
+        const sourceChatId = Number.parseInt(sourceChatIdRaw, 10);
+        if (!Number.isFinite(sourceChatId)) {
+          continue;
+        }
+
+        if (status !== 'pending' && status !== 'completed') {
+          continue;
+        }
+
+        tasks.push({
+          id,
+          instruction,
+          dueDateIso,
+          sourceChatId,
+          status,
+          createdAtIso,
+        });
+      }
+    } while (cursor !== '0');
+
+    tasks.sort((a, b) => a.dueDateIso.localeCompare(b.dueDateIso));
+    return tasks;
+  }
+
+  async deleteDelayedTask(chatId: number, taskId: string): Promise<boolean> {
+    const deleted = await this.client.del(this.delayedTaskKey(chatId, taskId));
+    return deleted > 0;
   }
 
   async withChatLock<T>(chatId: number, callback: () => Promise<T>): Promise<T> {
@@ -134,7 +214,11 @@ export class RedisService {
     return `${this.keyPrefix}:lock:${chatId}`;
   }
 
-  private delayedTasksKey(): string {
-    return `${this.keyPrefix}:delayed_tasks`;
+  private delayedTaskKey(chatId: number, id: string): string {
+    return `${this.keyPrefix}:chat:${chatId}:delayed_task:${id}`;
+  }
+
+  private delayedTaskPattern(chatId: number): string {
+    return `${this.keyPrefix}:chat:${chatId}:delayed_task:*`;
   }
 }
