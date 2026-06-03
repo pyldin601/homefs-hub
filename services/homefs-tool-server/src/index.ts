@@ -16,6 +16,7 @@ import {
   SeriesLookupSchema,
 } from './imdb';
 import { logger, serializeError } from './logger';
+import { PlexClient, PlexClientError, PlexWatchHistoryLookupSchema } from './plex';
 import { TolokaClient } from './toloka';
 import { TransmissionClient } from './transmission';
 import { tools } from './tools';
@@ -128,6 +129,7 @@ const executeToolCall = async (
   tolokaClient: TolokaClient,
   transmissionClient: TransmissionClient,
   imdbClient: ImdbClient,
+  plexClient: PlexClient,
 ): Promise<unknown> => {
   if (toolCall.function.name === 'get_date') {
     const parsed = GetDateArgsSchema.safeParse(parseToolArguments(toolCall.function.arguments));
@@ -238,6 +240,29 @@ const executeToolCall = async (
     }
   }
 
+  if (toolCall.function.name === 'list_plex_watch_history') {
+    const parsed = PlexWatchHistoryLookupSchema.safeParse(
+      parseToolArguments(toolCall.function.arguments),
+    );
+    if (!parsed.success) {
+      return {
+        error:
+          'Invalid arguments for list_plex_watch_history. Expected optional { limit, offset, accountId, librarySectionId, metadataItemId, viewedAtGte, sort }.',
+        details: parsed.error.flatten(),
+      };
+    }
+
+    try {
+      return await plexClient.listWatchHistory(parsed.data);
+    } catch (error) {
+      if (error instanceof PlexClientError) {
+        return { error: error.message, status: error.status };
+      }
+
+      throw error;
+    }
+  }
+
   if (toolCall.function.name === 'remove_torrent_from_transmission') {
     const parsed = TorrentHashArgsSchema.safeParse(parseToolArguments(toolCall.function.arguments));
     if (!parsed.success) {
@@ -325,6 +350,10 @@ const main = async (): Promise<void> => {
     apiKey: config.OMDB_API_KEY ?? config.IMDB_API_KEY,
     baseUrl: config.OMDB_BASE_URL,
   });
+  const plexClient = new PlexClient({
+    baseUrl: config.PLEX_URL,
+    token: config.PLEX_TOKEN,
+  });
 
   const app = express();
   app.use(express.json());
@@ -406,6 +435,30 @@ const main = async (): Promise<void> => {
     }
   });
 
+  app.get('/plex/watch-history', async (req, res) => {
+    const parseResult = PlexWatchHistoryLookupSchema.safeParse(req.query);
+    if (!parseResult.success) {
+      res.status(400).json({
+        error:
+          'Invalid query. Optional query params: limit, offset, accountId, librarySectionId, metadataItemId, viewedAtGte, sort.',
+        details: parseResult.error.flatten(),
+      });
+      return;
+    }
+
+    try {
+      const result = await plexClient.listWatchHistory(parseResult.data);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof PlexClientError) {
+        res.status(error.status ?? 502).json({ error: error.message });
+        return;
+      }
+
+      throw error;
+    }
+  });
+
   app.post('/tools/call', async (req, res) => {
     const parseResult = ToolCallRequestSchema.safeParse(req.body);
     if (!parseResult.success) {
@@ -422,6 +475,7 @@ const main = async (): Promise<void> => {
       tolokaClient,
       transmissionClient,
       imdbClient,
+      plexClient,
     );
 
     const response = ToolCallResponseSchema.parse({

@@ -123,6 +123,50 @@ export const tools = [
   {
     type: 'function',
     function: {
+      name: 'list_plex_watch_history',
+      description:
+        'List recent Plex Media Server playback history. Admin tokens can see all users; regular tokens can see only their own history.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: {
+            type: 'integer',
+            description: 'Maximum items to return, from 1 to 100. Defaults to 25.',
+          },
+          offset: {
+            type: 'integer',
+            description: 'Pagination offset. Defaults to 0.',
+          },
+          accountId: {
+            type: 'integer',
+            description: 'Optional Plex account ID filter.',
+          },
+          librarySectionId: {
+            type: 'integer',
+            description: 'Optional Plex library section ID filter.',
+          },
+          metadataItemId: {
+            type: 'integer',
+            description:
+              'Optional Plex metadata item ID filter. For a show, this can return history for its episodes.',
+          },
+          viewedAtGte: {
+            type: 'integer',
+            description: 'Optional unix timestamp lower bound for viewedAt.',
+          },
+          sort: {
+            type: 'string',
+            enum: ['viewedAt:desc', 'viewedAt:asc'],
+            description: 'Sort order. Defaults to viewedAt:desc.',
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'remove_torrent_from_transmission',
       description: 'Remove a torrent from Transmission by its hash.',
       parameters: {

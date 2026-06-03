@@ -30,6 +30,12 @@ IMDb:
 - If the user asks for episodes but does not specify a season, call get_series_seasons first, then ask which season unless the requested season is obvious from context.
 - Do not use torrent search tools for IMDb metadata questions unless the user is explicitly asking to find or manage torrents.
 
+Plex:
+
+- Use list_plex_watch_history when the user asks what was watched, recent Plex activity, watch history, or playback history.
+- Use filters such as limit, accountId, librarySectionId, metadataItemId, or viewedAtGte when the user specifies a user, library, title context, or time window.
+- Keep Plex history answers concise. Include title, type, and viewed time when available.
+
 Search:
 
 - When you need to search for something on Toloka, filter only relevant results.
