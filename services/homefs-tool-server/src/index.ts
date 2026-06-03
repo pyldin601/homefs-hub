@@ -8,6 +8,13 @@ import {
   type OllamaToolCall,
 } from 'homefs-shared';
 import { ConfigSchema } from './config';
+import {
+  ImdbClient,
+  ImdbClientError,
+  MovieDetailsLookupSchema,
+  SeriesEpisodesLookupSchema,
+  SeriesLookupSchema,
+} from './imdb';
 import { logger, serializeError } from './logger';
 import { TolokaClient } from './toloka';
 import { TransmissionClient } from './transmission';
@@ -120,6 +127,7 @@ const executeToolCall = async (
   toolCall: OllamaToolCall,
   tolokaClient: TolokaClient,
   transmissionClient: TransmissionClient,
+  imdbClient: ImdbClient,
 ): Promise<unknown> => {
   if (toolCall.function.name === 'get_date') {
     const parsed = GetDateArgsSchema.safeParse(parseToolArguments(toolCall.function.arguments));
@@ -161,6 +169,73 @@ const executeToolCall = async (
     }
 
     return await transmissionClient.listTorrents();
+  }
+
+  if (toolCall.function.name === 'get_movie_details') {
+    const parsed = MovieDetailsLookupSchema.safeParse(
+      parseToolArguments(toolCall.function.arguments),
+    );
+    if (!parsed.success) {
+      return {
+        error:
+          'Invalid arguments for get_movie_details. Expected exactly one of { imdbId: string } or { title: string }, with optional { year: string, plot: "short" | "full" }.',
+        details: parsed.error.flatten(),
+      };
+    }
+
+    try {
+      return await imdbClient.getMovieDetails(parsed.data);
+    } catch (error) {
+      if (error instanceof ImdbClientError) {
+        return { error: error.message, status: error.status };
+      }
+
+      throw error;
+    }
+  }
+
+  if (toolCall.function.name === 'get_series_episodes') {
+    const parsed = SeriesEpisodesLookupSchema.safeParse(
+      parseToolArguments(toolCall.function.arguments),
+    );
+    if (!parsed.success) {
+      return {
+        error:
+          'Invalid arguments for get_series_episodes. Expected season plus exactly one of { imdbId: string } or { title: string }, with optional { year: string }.',
+        details: parsed.error.flatten(),
+      };
+    }
+
+    try {
+      return await imdbClient.getSeriesEpisodes(parsed.data);
+    } catch (error) {
+      if (error instanceof ImdbClientError) {
+        return { error: error.message, status: error.status };
+      }
+
+      throw error;
+    }
+  }
+
+  if (toolCall.function.name === 'get_series_seasons') {
+    const parsed = SeriesLookupSchema.safeParse(parseToolArguments(toolCall.function.arguments));
+    if (!parsed.success) {
+      return {
+        error:
+          'Invalid arguments for get_series_seasons. Expected exactly one of { imdbId: string } or { title: string }, with optional { year: string }.',
+        details: parsed.error.flatten(),
+      };
+    }
+
+    try {
+      return await imdbClient.getSeriesSeasons(parsed.data);
+    } catch (error) {
+      if (error instanceof ImdbClientError) {
+        return { error: error.message, status: error.status };
+      }
+
+      throw error;
+    }
   }
 
   if (toolCall.function.name === 'remove_torrent_from_transmission') {
@@ -246,6 +321,10 @@ const main = async (): Promise<void> => {
     username: config.TRANS_USERNAME,
     password: config.TRANS_PASSWORD,
   });
+  const imdbClient = new ImdbClient({
+    apiKey: config.OMDB_API_KEY ?? config.IMDB_API_KEY,
+    baseUrl: config.OMDB_BASE_URL,
+  });
 
   const app = express();
   app.use(express.json());
@@ -253,6 +332,78 @@ const main = async (): Promise<void> => {
   app.get('/tools', (_req, res) => {
     const response = ListToolsResponseSchema.parse({ tools });
     res.json(response);
+  });
+
+  app.get('/movies/details', async (req, res) => {
+    const parseResult = MovieDetailsLookupSchema.safeParse(req.query);
+    if (!parseResult.success) {
+      res.status(400).json({
+        error:
+          'Invalid query. Provide exactly one of imdbId or title. Optional query params: year, plot.',
+        details: parseResult.error.flatten(),
+      });
+      return;
+    }
+
+    try {
+      const result = await imdbClient.getMovieDetails(parseResult.data);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ImdbClientError) {
+        res.status(error.status ?? 502).json({ error: error.message });
+        return;
+      }
+
+      throw error;
+    }
+  });
+
+  app.get('/series/episodes', async (req, res) => {
+    const parseResult = SeriesEpisodesLookupSchema.safeParse(req.query);
+    if (!parseResult.success) {
+      res.status(400).json({
+        error:
+          'Invalid query. Provide season plus exactly one of imdbId or title. Optional query params: year.',
+        details: parseResult.error.flatten(),
+      });
+      return;
+    }
+
+    try {
+      const result = await imdbClient.getSeriesEpisodes(parseResult.data);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ImdbClientError) {
+        res.status(error.status ?? 502).json({ error: error.message });
+        return;
+      }
+
+      throw error;
+    }
+  });
+
+  app.get('/series/seasons', async (req, res) => {
+    const parseResult = SeriesLookupSchema.safeParse(req.query);
+    if (!parseResult.success) {
+      res.status(400).json({
+        error:
+          'Invalid query. Provide exactly one of imdbId or title. Optional query params: year.',
+        details: parseResult.error.flatten(),
+      });
+      return;
+    }
+
+    try {
+      const result = await imdbClient.getSeriesSeasons(parseResult.data);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ImdbClientError) {
+        res.status(error.status ?? 502).json({ error: error.message });
+        return;
+      }
+
+      throw error;
+    }
   });
 
   app.post('/tools/call', async (req, res) => {
@@ -266,7 +417,12 @@ const main = async (): Promise<void> => {
     }
 
     const toolCall = parseResult.data.tool_call;
-    const toolResult = await executeToolCall(toolCall, tolokaClient, transmissionClient);
+    const toolResult = await executeToolCall(
+      toolCall,
+      tolokaClient,
+      transmissionClient,
+      imdbClient,
+    );
 
     const response = ToolCallResponseSchema.parse({
       tool_name: toolCall.function.name,

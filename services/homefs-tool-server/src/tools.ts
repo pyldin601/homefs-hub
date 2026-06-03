@@ -35,6 +35,94 @@ export const tools = [
   {
     type: 'function',
     function: {
+      name: 'get_movie_details',
+      description:
+        'Fetch movie details from IMDb by IMDb title ID (for example tt0133093) or exact title. Use imdbId when available.',
+      parameters: {
+        type: 'object',
+        properties: {
+          imdbId: {
+            type: 'string',
+            description: 'IMDb title ID, for example tt0133093',
+          },
+          title: {
+            type: 'string',
+            description: 'Movie title to look up when IMDb ID is not known',
+          },
+          year: {
+            type: 'string',
+            description: 'Optional release year, for example 1999',
+          },
+          plot: {
+            type: 'string',
+            enum: ['short', 'full'],
+            description: 'Plot length to return. Defaults to full.',
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_series_seasons',
+      description:
+        'Fetch the available season numbers for a TV series from IMDb by IMDb title ID or exact title. Use imdbId when available.',
+      parameters: {
+        type: 'object',
+        properties: {
+          imdbId: {
+            type: 'string',
+            description: 'IMDb series title ID, for example tt0944947',
+          },
+          title: {
+            type: 'string',
+            description: 'Series title to look up when IMDb ID is not known',
+          },
+          year: {
+            type: 'string',
+            description: 'Optional series release year, for example 2011',
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_series_episodes',
+      description:
+        'Fetch the episode list for a specific TV series season from IMDb by IMDb title ID or exact title. Use imdbId when available.',
+      parameters: {
+        type: 'object',
+        properties: {
+          imdbId: {
+            type: 'string',
+            description: 'IMDb series title ID, for example tt0944947',
+          },
+          title: {
+            type: 'string',
+            description: 'Series title to look up when IMDb ID is not known',
+          },
+          year: {
+            type: 'string',
+            description: 'Optional series release year, for example 2011',
+          },
+          season: {
+            type: 'integer',
+            description: 'Season number to fetch, for example 1',
+          },
+        },
+        required: ['season'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'remove_torrent_from_transmission',
       description: 'Remove a torrent from Transmission by its hash.',
       parameters: {

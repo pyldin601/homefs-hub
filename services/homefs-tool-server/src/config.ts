@@ -7,6 +7,9 @@ export const ConfigSchema = z.object({
   TRANS_URL: z.string().url(),
   TRANS_USERNAME: z.string().optional(),
   TRANS_PASSWORD: z.string().optional(),
+  OMDB_API_KEY: z.string().min(1).optional(),
+  IMDB_API_KEY: z.string().min(1).optional(),
+  OMDB_BASE_URL: z.string().url().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
